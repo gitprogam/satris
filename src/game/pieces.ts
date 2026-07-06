@@ -108,4 +108,30 @@ export function getKicks(piece: PieceType, from: RotationState, to: RotationStat
   return table[key].map(([dx, dy]) => [dx, -dy]); // 화면 좌표계로 변환 (row 증가 = 아래)
 }
 
+// 180도 회전(스핀) 킥 테이블 - SRS 공식 규격은 아니지만 tetr.io 등 대부분의 구현이 쓰는 커뮤니티 표준 테이블
+type Kick180Table = Record<string, [number, number][]>;
+
+const JLSTZ_180_KICKS: Kick180Table = {
+  "0": [[0, 0], [0, 1], [1, 1], [-1, 1], [1, 0], [-1, 0]],
+  "1": [[0, 0], [1, 0], [1, 2], [1, 1], [0, 2], [0, 1]],
+  "2": [[0, 0], [0, -1], [-1, -1], [1, -1], [-1, 0], [1, 0]],
+  "3": [[0, 0], [-1, 0], [-1, -2], [-1, -1], [0, -2], [0, -1]],
+};
+
+const I_180_KICKS: Kick180Table = {
+  "0": [[0, 0], [0, -1], [0, 1], [0, -2], [0, 2]],
+  "1": [[0, 0], [1, 0], [-1, 0], [2, 0], [-2, 0]],
+  "2": [[0, 0], [0, 1], [0, -1], [0, 2], [0, -2]],
+  "3": [[0, 0], [-1, 0], [1, 0], [-2, 0], [2, 0]],
+};
+
+const O_180_KICKS: Kick180Table = {
+  "0": [[0, 0]], "1": [[0, 0]], "2": [[0, 0]], "3": [[0, 0]],
+};
+
+export function get180Kicks(piece: PieceType, from: RotationState): [number, number][] {
+  const table = piece === "I" ? I_180_KICKS : piece === "O" ? O_180_KICKS : JLSTZ_180_KICKS;
+  return table[String(from)].map(([dx, dy]) => [dx, -dy]);
+}
+
 export const ALL_PIECES: PieceType[] = ["I", "O", "T", "S", "Z", "J", "L"];

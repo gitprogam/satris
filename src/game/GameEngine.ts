@@ -11,7 +11,7 @@ import {
 import type { PieceType } from "./constants";
 import { Board } from "./Board";
 import { SevenBag } from "./Bag";
-import { getKicks, PIECE_SHAPES } from "./pieces";
+import { get180Kicks, getKicks, PIECE_SHAPES } from "./pieces";
 import type { RotationState } from "./pieces";
 
 export interface ActivePiece {
@@ -196,6 +196,24 @@ export class GameEngine {
     const from = this.active.rotation;
     const to = ((from + dir + 4) % 4) as RotationState;
     const kicks = getKicks(this.active.type, from, to);
+    for (let i = 0; i < kicks.length; i++) {
+      const [dx, dy] = kicks[i];
+      const candidate: ActivePiece = { ...this.active, rotation: to, col: this.active.col + dx, row: this.active.row + dy };
+      if (this.canPlace(candidate)) {
+        this.active = candidate;
+        this.lastActionWasRotate = true;
+        this.lastKickIndex = i;
+        this.onSuccessfulMove();
+        return;
+      }
+    }
+  }
+
+  rotate180() {
+    if (!this.active || this.gameOver || this.paused) return;
+    const from = this.active.rotation;
+    const to = ((from + 2) % 4) as RotationState;
+    const kicks = get180Kicks(this.active.type, from);
     for (let i = 0; i < kicks.length; i++) {
       const [dx, dy] = kicks[i];
       const candidate: ActivePiece = { ...this.active, rotation: to, col: this.active.col + dx, row: this.active.row + dy };

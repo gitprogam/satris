@@ -54,6 +54,10 @@ export class InputHandler {
       case "Control":
         this.engine.rotate(-1);
         break;
+      case "f":
+      case "F":
+        this.engine.rotate180();
+        break;
       case " ":
         this.engine.hardDrop();
         break;
