@@ -1,18 +1,16 @@
 import {
   BUFFER_ROWS,
-  DEFAULT_ARR,
-  DEFAULT_DAS,
   gravityForLevel,
   LINES_PER_LEVEL,
   LOCK_DELAY,
   MAX_LOCK_RESETS,
-  SOFT_DROP_FACTOR,
 } from "./constants";
 import type { PieceType } from "./constants";
 import { Board } from "./Board";
 import { SevenBag } from "./Bag";
 import { get180Kicks, getKicks, PIECE_SHAPES } from "./pieces";
 import type { RotationState } from "./pieces";
+import { DEFAULT_SETTINGS, type EngineSettings } from "./Settings";
 
 export interface ActivePiece {
   type: PieceType;
@@ -73,9 +71,20 @@ export class GameEngine {
   private dasTimer: Record<"left" | "right", number> = { left: 0, right: 0 };
   private arrTimer: Record<"left" | "right", number> = { left: 0, right: 0 };
   private heldDir: "left" | "right" | null = null;
+  // DCD(DAS Cut Delay): 회전/스폰 시 진행 중이던 DAS 충전을 일시정지시키는 시간(ms)
+  private dasCutTimer = 0;
 
-  das = DEFAULT_DAS;
-  arr = DEFAULT_ARR;
+  das = DEFAULT_SETTINGS.das;
+  arr = DEFAULT_SETTINGS.arr;
+  sdf = DEFAULT_SETTINGS.sdf;
+  dcd = DEFAULT_SETTINGS.dcd;
+
+  applySettings(settings: Partial<EngineSettings>) {
+    if (settings.das !== undefined) this.das = settings.das;
+    if (settings.arr !== undefined) this.arr = settings.arr;
+    if (settings.sdf !== undefined) this.sdf = settings.sdf;
+    if (settings.dcd !== undefined) this.dcd = settings.dcd;
+  }
 
   lastClear: ClearEvent | null = null;
   private clearIdCounter = 0;
@@ -103,6 +112,11 @@ export class GameEngine {
     this.lockResets = 0;
     this.isGrounded = false;
     this.lastClear = null;
+    this.heldDir = null;
+    this.dasTimer = { left: 0, right: 0 };
+    this.arrTimer = { left: 0, right: 0 };
+    this.dasCutTimer = 0;
+    this.softDropActive = false;
     this.spawnNext();
   }
 
@@ -135,6 +149,7 @@ export class GameEngine {
     this.lockResets = 0;
     this.isGrounded = false;
     this.lastActionWasRotate = false;
+    this.cutDas();
 
     if (!this.canPlace(piece)) {
       this.gameOver = true;
@@ -204,6 +219,7 @@ export class GameEngine {
         this.lastActionWasRotate = true;
         this.lastKickIndex = i;
         this.onSuccessfulMove();
+        this.cutDas();
         return;
       }
     }
@@ -222,12 +238,17 @@ export class GameEngine {
         this.lastActionWasRotate = true;
         this.lastKickIndex = i;
         this.onSuccessfulMove();
+        this.cutDas();
         return;
       }
     }
   }
 
   softDrop(active: boolean) {
+    if (this.softDropActive !== active) {
+      // 소프트드롭 on/off 전환 시 누적된 중력 시간을 리셋해서 속도가 튀지 않게 함
+      this.gravityAccum = 0;
+    }
     this.softDropActive = active;
   }
   private softDropActive = false;
@@ -370,13 +391,20 @@ export class GameEngine {
   }
 
   setInput(dir: "left" | "right" | null) {
-    if (this.heldDir !== dir) {
-      this.heldDir = dir;
-      if (dir) {
-        this.dasTimer[dir] = 0;
-        this.arrTimer[dir] = 0;
-        this.move(dir === "left" ? -1 : 1, 0);
-      }
+    if (this.heldDir === dir) return;
+    this.heldDir = dir;
+    if (dir) {
+      this.dasTimer[dir] = 0;
+      this.arrTimer[dir] = 0;
+      this.move(dir === "left" ? -1 : 1, 0);
+    }
+  }
+
+  // DCD(DAS Cut Delay): 회전하거나 새 피스가 스폰될 때, 방향키를 누르고 있었다면
+  // 그 DAS 충전을 dcd(ms)만큼 일시정지시킴 (진행도는 유지, tetr.io 동작 방식)
+  private cutDas() {
+    if (this.heldDir && this.dcd > 0) {
+      this.dasCutTimer = this.dcd;
     }
   }
 
@@ -385,36 +413,52 @@ export class GameEngine {
 
     // DAS/ARR 처리
     if (this.heldDir) {
-      const dir = this.heldDir;
-      this.dasTimer[dir] += deltaMs;
-      if (this.dasTimer[dir] >= this.das) {
-        this.arrTimer[dir] += deltaMs;
-        if (this.arr <= 0) {
-          // 즉시 반복: 벽에 닿을 때까지 이동
-          while (this.move(dir === "left" ? -1 : 1, 0)) { /* keep moving */ }
-        } else {
-          while (this.arrTimer[dir] >= this.arr) {
-            this.arrTimer[dir] -= this.arr;
-            if (!this.move(dir === "left" ? -1 : 1, 0)) break;
+      if (this.dasCutTimer > 0) {
+        this.dasCutTimer = Math.max(0, this.dasCutTimer - deltaMs);
+      } else {
+        const dir = this.heldDir;
+        this.dasTimer[dir] += deltaMs;
+        if (this.dasTimer[dir] >= this.das) {
+          this.arrTimer[dir] += deltaMs;
+          if (this.arr <= 0) {
+            // 즉시 반복: 벽에 닿을 때까지 이동
+            while (this.move(dir === "left" ? -1 : 1, 0)) { /* keep moving */ }
+          } else {
+            while (this.arrTimer[dir] >= this.arr) {
+              this.arrTimer[dir] -= this.arr;
+              if (!this.move(dir === "left" ? -1 : 1, 0)) break;
+            }
           }
         }
       }
     }
 
-    const baseGravity = gravityForLevel(this.level);
-    const effectiveGravity = this.softDropActive ? baseGravity / SOFT_DROP_FACTOR : baseGravity;
-
-    this.gravityAccum += deltaMs;
-    while (this.gravityAccum >= effectiveGravity) {
-      this.gravityAccum -= effectiveGravity;
-      if (this.canPlace({ ...this.active, row: this.active.row + 1 })) {
-        this.active.row++;
-        if (this.softDropActive) this.score += 1;
-        this.isGrounded = false;
+    if (this.softDropActive && this.sdf >= 41) {
+      // SDF 최댓값: 바닥까지 즉시 떨어지되(락딜레이는 그대로 유지) 하드드롭과 달리 즉시 고정되진 않음
+      const ghostRow = this.getGhostRow();
+      if (ghostRow > this.active.row) {
+        this.score += ghostRow - this.active.row;
+        this.active.row = ghostRow;
         this.lastActionWasRotate = false;
-      } else {
-        this.isGrounded = true;
-        break;
+      }
+      this.isGrounded = true;
+      this.gravityAccum = 0;
+    } else {
+      const baseGravity = gravityForLevel(this.level);
+      const effectiveGravity = this.softDropActive ? baseGravity / this.sdf : baseGravity;
+
+      this.gravityAccum += deltaMs;
+      while (this.gravityAccum >= effectiveGravity) {
+        this.gravityAccum -= effectiveGravity;
+        if (this.canPlace({ ...this.active, row: this.active.row + 1 })) {
+          this.active.row++;
+          if (this.softDropActive) this.score += 1;
+          this.isGrounded = false;
+          this.lastActionWasRotate = false;
+        } else {
+          this.isGrounded = true;
+          break;
+        }
       }
     }
 

@@ -19,9 +19,7 @@ const PIECE_COLORS := {
 
 const GHOST_ALPHA := 0.25
 
-const DEFAULT_DAS := 133.0
-const DEFAULT_ARR := 2.0
-const SOFT_DROP_FACTOR := 20.0
+# DAS/ARR/SDF/DCD는 Settings.gd에서 사용자가 커스텀 설정
 const LOCK_DELAY := 500.0
 const MAX_LOCK_RESETS := 15
 const LINES_PER_LEVEL := 10

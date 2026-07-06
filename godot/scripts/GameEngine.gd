@@ -30,10 +30,25 @@ var is_grounded := false
 var das_timer := {"left": 0.0, "right": 0.0}
 var arr_timer := {"left": 0.0, "right": 0.0}
 var held_dir = null
+# DCD(DAS Cut Delay): 회전/스폰 시 진행 중이던 DAS 충전을 일시정지시키는 시간(ms)
+var das_cut_timer := 0.0
 
-var das := GameConstants.DEFAULT_DAS
-var arr := GameConstants.DEFAULT_ARR
+var das: float = Settings.DEFAULTS["das"]
+var arr: float = Settings.DEFAULTS["arr"]
+var sdf: float = Settings.DEFAULTS["sdf"]
+var dcd: float = Settings.DEFAULTS["dcd"]
 var soft_drop_active := false
+
+func apply_settings(settings: Dictionary) -> void:
+	if settings.has("das"): das = settings["das"]
+	if settings.has("arr"): arr = settings["arr"]
+	if settings.has("sdf"): sdf = settings["sdf"]
+	if settings.has("dcd"): dcd = settings["dcd"]
+
+# 회전하거나 새 피스가 스폰될 때, 방향키를 누르고 있었다면 DAS 충전을 dcd(ms)만큼 일시정지 (tetr.io 동작 방식)
+func _cut_das() -> void:
+	if held_dir != null and dcd > 0:
+		das_cut_timer = dcd
 
 var last_clear = null
 var clear_id_counter := 0
@@ -60,6 +75,11 @@ func reset() -> void:
 	lock_resets = 0
 	is_grounded = false
 	last_clear = null
+	held_dir = null
+	das_timer = {"left": 0.0, "right": 0.0}
+	arr_timer = {"left": 0.0, "right": 0.0}
+	das_cut_timer = 0.0
+	soft_drop_active = false
 	_spawn_next()
 
 func next_queue() -> Array:
@@ -87,6 +107,7 @@ func _spawn_next() -> void:
 	lock_resets = 0
 	is_grounded = false
 	last_action_was_rotate = false
+	_cut_das()
 
 	if not _can_place(active):
 		game_over = true
@@ -162,6 +183,7 @@ func rotate(dir: int) -> void:
 			last_action_was_rotate = true
 			last_kick_index = i
 			_on_successful_move()
+			_cut_das()
 			return
 
 func rotate180() -> void:
@@ -182,9 +204,13 @@ func rotate180() -> void:
 			last_action_was_rotate = true
 			last_kick_index = i
 			_on_successful_move()
+			_cut_das()
 			return
 
 func set_soft_drop(flag: bool) -> void:
+	if soft_drop_active != flag:
+		# 소프트드롭 on/off 전환 시 누적된 중력 시간을 리셋해서 속도가 튀지 않게 함
+		gravity_accum = 0.0
 	soft_drop_active = flag
 
 func hard_drop() -> void:
@@ -347,36 +373,49 @@ func update(delta_ms: float) -> void:
 		return
 
 	if held_dir != null:
-		var dir = held_dir
-		das_timer[dir] += delta_ms
-		if das_timer[dir] >= das:
-			arr_timer[dir] += delta_ms
-			if arr <= 0:
-				while _move(-1 if dir == "left" else 1, 0):
-					pass
-			else:
-				while arr_timer[dir] >= arr:
-					arr_timer[dir] -= arr
-					if not _move(-1 if dir == "left" else 1, 0):
-						break
-
-	var base_gravity := GameConstants.gravity_for_level(level)
-	var effective_gravity := base_gravity / GameConstants.SOFT_DROP_FACTOR if soft_drop_active else base_gravity
-
-	gravity_accum += delta_ms
-	while gravity_accum >= effective_gravity:
-		gravity_accum -= effective_gravity
-		var candidate := active.clone()
-		candidate.row += 1
-		if _can_place(candidate):
-			active = candidate
-			if soft_drop_active:
-				score += 1
-			is_grounded = false
-			last_action_was_rotate = false
+		if das_cut_timer > 0.0:
+			das_cut_timer = max(0.0, das_cut_timer - delta_ms)
 		else:
-			is_grounded = true
-			break
+			var dir = held_dir
+			das_timer[dir] += delta_ms
+			if das_timer[dir] >= das:
+				arr_timer[dir] += delta_ms
+				if arr <= 0:
+					while _move(-1 if dir == "left" else 1, 0):
+						pass
+				else:
+					while arr_timer[dir] >= arr:
+						arr_timer[dir] -= arr
+						if not _move(-1 if dir == "left" else 1, 0):
+							break
+
+	if soft_drop_active and sdf >= 41:
+		# SDF 최댓값: 바닥까지 즉시 떨어지되(락딜레이는 유지) 하드드롭과 달리 즉시 고정되진 않음
+		var ghost_row := get_ghost_row()
+		if ghost_row > active.row:
+			score += ghost_row - active.row
+			active.row = ghost_row
+			last_action_was_rotate = false
+		is_grounded = true
+		gravity_accum = 0.0
+	else:
+		var base_gravity := GameConstants.gravity_for_level(level)
+		var effective_gravity := base_gravity / sdf if soft_drop_active else base_gravity
+
+		gravity_accum += delta_ms
+		while gravity_accum >= effective_gravity:
+			gravity_accum -= effective_gravity
+			var candidate := active.clone()
+			candidate.row += 1
+			if _can_place(candidate):
+				active = candidate
+				if soft_drop_active:
+					score += 1
+				is_grounded = false
+				last_action_was_rotate = false
+			else:
+				is_grounded = true
+				break
 
 	if is_grounded:
 		lock_timer += delta_ms

@@ -8,6 +8,29 @@
   </head>
   <body>
     <div id="app"></div>
+    <div id="settings-panel" class="hidden">
+      <h2>설정 <span class="hint">(Tab으로 열고 닫기)</span></h2>
+      <label>
+        DAS <span class="hint">(Delayed Auto Shift, ms)</span>
+        <input type="number" id="set-das" min="0" max="500" step="1" />
+      </label>
+      <label>
+        ARR <span class="hint">(Auto Repeat Rate, ms)</span>
+        <input type="number" id="set-arr" min="0" max="100" step="0.5" />
+      </label>
+      <label>
+        SDF <span class="hint">(Soft Drop Factor, 5~41, 41=즉시)</span>
+        <input type="number" id="set-sdf" min="5" max="41" step="1" />
+      </label>
+      <label>
+        DCD <span class="hint">(DAS Cancel Delay, ms)</span>
+        <input type="number" id="set-dcd" min="0" max="300" step="1" />
+      </label>
+      <div class="settings-actions">
+        <button id="settings-reset" type="button">기본값으로</button>
+        <button id="settings-close" type="button">닫기</button>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

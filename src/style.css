@@ -22,3 +22,74 @@ body {
 canvas {
   display: block;
 }
+
+#settings-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 340px;
+  background: #15151f;
+  border: 2px solid #33334a;
+  border-radius: 10px;
+  padding: 24px;
+  color: #d0d0e8;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  z-index: 10;
+}
+
+#settings-panel.hidden {
+  display: none;
+}
+
+#settings-panel h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+#settings-panel .hint {
+  color: #7070a0;
+  font-weight: 400;
+  font-size: 12px;
+}
+
+#settings-panel label {
+  display: block;
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#settings-panel input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  background: #0a0a12;
+  border: 1px solid #33334a;
+  border-radius: 6px;
+  color: #f0f0ff;
+  font-size: 14px;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.settings-actions button {
+  flex: 1;
+  padding: 10px;
+  background: #2a2a40;
+  border: 1px solid #3a3a56;
+  border-radius: 6px;
+  color: #e0e0f0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.settings-actions button:hover {
+  background: #34344e;
+}

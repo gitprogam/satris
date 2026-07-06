@@ -37,8 +37,13 @@ var last_clear_id := -1
 var held_keys := {}
 var dir_stack := []
 
+var settings_panel: SettingsPanel
+var settings_open := false
+var was_paused_before_settings := false
+
 func _ready() -> void:
 	engine = GameEngine.new()
+	engine.apply_settings(Settings.load_settings())
 
 	var board_w := GameConstants.COLS * GameConstants.CELL_SIZE
 	var board_h := GameConstants.VISIBLE_ROWS * GameConstants.CELL_SIZE
@@ -50,6 +55,10 @@ func _ready() -> void:
 
 	_build_side_panels(board_w, board_h)
 	_build_overlay(board_w, board_h)
+
+	settings_panel = SettingsPanel.new()
+	settings_panel.closed.connect(_close_settings)
+	add_child(settings_panel)
 
 func _label(text: String, pos: Vector2, color := Color(0.82, 0.82, 0.91), size := 15) -> Label:
 	var l := Label.new()
@@ -166,7 +175,29 @@ func _render(delta_ms: float) -> void:
 		overlay_label.visible = false
 		overlay_sub_label.visible = false
 
+func _input(event: InputEvent) -> void:
+	# Tab은 설정창이 열려있어 다른 컨트롤에 포커스가 가 있어도 항상 먹혀야 함
+	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_TAB:
+		get_viewport().set_input_as_handled()
+		if settings_open:
+			_close_settings()
+		else:
+			_open_settings()
+
+func _open_settings() -> void:
+	settings_open = true
+	was_paused_before_settings = engine.paused
+	engine.paused = true
+	settings_panel.open_with(engine)
+
+func _close_settings() -> void:
+	settings_open = false
+	engine.paused = was_paused_before_settings
+	settings_panel.visible = false
+
 func _unhandled_key_input(event: InputEvent) -> void:
+	if settings_open:
+		return
 	if event is InputEventKey:
 		if event.pressed and not event.echo:
 			_key_down(event.physical_keycode)
@@ -179,9 +210,9 @@ func _key_down(key: int) -> void:
 	held_keys[key] = true
 
 	match key:
-		KEY_LEFT, KEY_A:
+		KEY_LEFT:
 			_push_dir("left")
-		KEY_RIGHT, KEY_D:
+		KEY_RIGHT:
 			_push_dir("right")
 		KEY_DOWN, KEY_S:
 			engine.set_soft_drop(true)
@@ -189,7 +220,7 @@ func _key_down(key: int) -> void:
 			engine.rotate(1)
 		KEY_Z, KEY_CTRL:
 			engine.rotate(-1)
-		KEY_F:
+		KEY_A, KEY_F:
 			engine.rotate180()
 		KEY_SPACE:
 			engine.hard_drop()
@@ -206,9 +237,9 @@ func _key_down(key: int) -> void:
 func _key_up(key: int) -> void:
 	held_keys.erase(key)
 	match key:
-		KEY_LEFT, KEY_A:
+		KEY_LEFT:
 			_pop_dir("left")
-		KEY_RIGHT, KEY_D:
+		KEY_RIGHT:
 			_pop_dir("right")
 		KEY_DOWN, KEY_S:
 			engine.set_soft_drop(false)

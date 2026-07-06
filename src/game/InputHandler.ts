@@ -6,7 +6,9 @@ export class InputHandler {
 
   onPause: (() => void) | null = null;
   onRestart: (() => void) | null = null;
+  onToggleSettings: (() => void) | null = null;
   private engine: GameEngine;
+  private settingsOpen = false;
 
   constructor(engine: GameEngine) {
     this.engine = engine;
@@ -19,8 +21,24 @@ export class InputHandler {
     window.removeEventListener("keyup", this.handleKeyUp);
   }
 
+  setSettingsOpen(open: boolean) {
+    this.settingsOpen = open;
+  }
+
   private handleKeyDown = (e: KeyboardEvent) => {
     const key = e.key;
+
+    if (key === "Tab") {
+      e.preventDefault();
+      if (!this.heldKeys.has(key)) {
+        this.heldKeys.add(key);
+        this.onToggleSettings?.();
+      }
+      return;
+    }
+
+    if (this.settingsOpen) return; // 설정 창이 열려있으면 게임 입력 무시 (입력 필드에 그대로 타이핑)
+
     if (["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", " ", "Shift"].includes(key)) {
       e.preventDefault();
     }
@@ -30,13 +48,9 @@ export class InputHandler {
 
     switch (key) {
       case "ArrowLeft":
-      case "a":
-      case "A":
         this.pushDir("left");
         break;
       case "ArrowRight":
-      case "d":
-      case "D":
         this.pushDir("right");
         break;
       case "ArrowDown":
@@ -54,6 +68,8 @@ export class InputHandler {
       case "Control":
         this.engine.rotate(-1);
         break;
+      case "a":
+      case "A":
       case "f":
       case "F":
         this.engine.rotate180();
@@ -82,15 +98,13 @@ export class InputHandler {
     const key = e.key;
     this.heldKeys.delete(key);
 
+    if (this.settingsOpen) return;
+
     switch (key) {
       case "ArrowLeft":
-      case "a":
-      case "A":
         this.popDir("left");
         break;
       case "ArrowRight":
-      case "d":
-      case "D":
         this.popDir("right");
         break;
       case "ArrowDown":

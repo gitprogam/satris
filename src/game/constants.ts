@@ -20,10 +20,7 @@ export const PIECE_COLORS: Record<PieceType, number> = {
 
 export const GHOST_ALPHA = 0.25;
 
-// 타이밍 (ms) - tetr.io 기본값과 유사하게 설정
-export const DEFAULT_DAS = 133; // Delayed Auto Shift
-export const DEFAULT_ARR = 2; // Auto Repeat Rate (0에 가까울수록 빠름)
-export const SOFT_DROP_FACTOR = 20; // 소프트드롭 시 중력 배율
+// 타이밍 (ms) - DAS/ARR/SDF/DCD는 game/Settings.ts에서 사용자가 커스텀 설정
 export const LOCK_DELAY = 500; // 락 딜레이
 export const MAX_LOCK_RESETS = 15; // 락 딜레이 리셋 최대 횟수
 export const ARE_DELAY = 100; // 라인 클리어 후 다음 피스 등장까지 딜레이
