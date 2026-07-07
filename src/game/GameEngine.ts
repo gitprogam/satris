@@ -239,13 +239,29 @@ export class GameEngine {
     this.move(1, 0);
   }
 
+  // 이동/회전 직후에는 바닥에 닿아있는지 다시 계산해야 한다. 그렇지 않으면 킥으로 위로
+  // 튕겨 올라가거나(예: I피스 킥, T-스핀 피니시) 턱을 타고 옆으로 미끄러져 내려가서
+  // 실제로는 허공에 떠 있는데도 isGrounded가 이전 값(true)에 머물러 있게 되고,
+  // 락 타이머가 계속 쌓여 다음 중력 판정(최대 한 칸당 걸리는 시간만큼 늦게 옴)이
+  // 오기도 전에 허공에서 그대로 고정("미노가 공중에 뜨는" 버그)돼버린다.
   private onSuccessfulMove() {
-    if (this.isGrounded) {
+    if (!this.active) return;
+    const wasGrounded = this.isGrounded;
+    const nowGrounded = !this.canPlace({ ...this.active, row: this.active.row + 1 });
+
+    if (nowGrounded && wasGrounded) {
       if (this.lockResets < MAX_LOCK_RESETS) {
         this.lockTimer = 0;
         this.lockResets++;
       }
+    } else if (nowGrounded && !wasGrounded) {
+      this.lockTimer = 0;
+      this.lockResets = 0;
+    } else {
+      this.lockTimer = 0;
     }
+
+    this.isGrounded = nowGrounded;
   }
 
   rotate(dir: 1 | -1) {
