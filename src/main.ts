@@ -111,8 +111,12 @@ async function bootstrap() {
   const pvpResultText = document.querySelector<HTMLHeadingElement>("#pvp-result-text")!;
   const pvpResultMenuBtn = document.querySelector<HTMLButtonElement>("#pvp-result-menu")!;
 
-  pvpServerUrlInput.value = `ws://${location.hostname}:8080`;
-  duoServerUrlInput.value = `ws://${location.hostname}:8080`;
+  // 로컬 개발(HTTP)에서는 지금까지처럼 :8080 포트로 직접 접속. 클라우드플레어 터널
+  // 등으로 HTTPS 배포됐을 때는 같은 도메인의 /ws 경로로 접속 - 터널의 ingress 설정이
+  // "/ws"는 로컬 WS 서버(8080)로, 나머지는 정적 사이트로 라우팅하도록 되어 있음.
+  const defaultWsUrl = location.protocol === "https:" ? `wss://${location.host}/ws` : `ws://${location.hostname}:8080`;
+  pvpServerUrlInput.value = defaultWsUrl;
+  duoServerUrlInput.value = defaultWsUrl;
 
   const renderer = new GameRenderer(app);
 
