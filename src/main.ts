@@ -5,6 +5,7 @@ import { GameRenderer } from "./render/GameRenderer";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type EngineSettings } from "./game/Settings";
 import { PvpSession } from "./pvp/PvpSession";
 import { DuoSession } from "./duo/DuoSession";
+import { FourWidePractice } from "./game/FourWidePractice";
 import "./style.css";
 
 function setupSettingsPanel(getEngine: () => GameEngine | null, input: InputHandler) {
@@ -88,6 +89,7 @@ async function bootstrap() {
   const menuSingleBtn = document.querySelector<HTMLButtonElement>("#menu-single")!;
   const menuPvpBtn = document.querySelector<HTMLButtonElement>("#menu-pvp")!;
   const menuDuoBtn = document.querySelector<HTMLButtonElement>("#menu-duo")!;
+  const menu4WideBtn = document.querySelector<HTMLButtonElement>("#menu-4wide")!;
 
   const pvpLobby = document.querySelector<HTMLDivElement>("#pvp-lobby")!;
   const pvpServerUrlInput = document.querySelector<HTMLInputElement>("#pvp-server-url")!;
@@ -120,12 +122,14 @@ async function bootstrap() {
 
   const renderer = new GameRenderer(app);
 
-  let mode: "menu" | "single" | "pvp" | "duo" = "menu";
+  let mode: "menu" | "single" | "pvp" | "duo" | "fourwide" = "menu";
   let singleEngine: GameEngine | null = null;
   let singleInput: InputHandler | null = null;
   let pvpSession: PvpSession | null = null;
   let pvpInput: InputHandler | null = null;
   let duoSession: DuoSession | null = null;
+  let fourWidePractice: FourWidePractice | null = null;
+  let fourWideInput: InputHandler | null = null;
   let duoInput: InputHandler | null = null;
 
   function showOnly(el: HTMLElement | null) {
@@ -156,6 +160,9 @@ async function bootstrap() {
     duoStatusText.textContent = "";
     duoRoomCodeText.textContent = "";
     duoCodeInput.value = "";
+    fourWideInput?.dispose();
+    fourWideInput = null;
+    fourWidePractice = null;
     showOnly(menuScreen);
   }
 
@@ -169,6 +176,19 @@ async function bootstrap() {
     };
     singleInput.onRestart = () => singleEngine!.reset();
     setupSettingsPanel(() => singleEngine, singleInput);
+  }
+
+  function startFourWidePractice() {
+    mode = "fourwide";
+    showOnly(null);
+    fourWidePractice = new FourWidePractice();
+    fourWideInput = new InputHandler(fourWidePractice.engine);
+    fourWideInput.onPause = () => {
+      const engine = fourWidePractice!.engine;
+      if (!engine.gameOver) engine.paused = !engine.paused;
+    };
+    fourWideInput.onRestart = () => fourWidePractice!.restart();
+    setupSettingsPanel(() => fourWidePractice?.engine ?? null, fourWideInput);
   }
 
   function startPvpLobby() {
@@ -242,6 +262,7 @@ async function bootstrap() {
   menuSingleBtn.addEventListener("click", startSingle);
   menuPvpBtn.addEventListener("click", startPvpLobby);
   menuDuoBtn.addEventListener("click", startDuoLobby);
+  menu4WideBtn.addEventListener("click", startFourWidePractice);
   pvpCreateBtn.addEventListener("click", () => {
     pvpStatusText.textContent = "방 만드는 중...";
     pvpSession?.createRoom();
@@ -277,6 +298,9 @@ async function bootstrap() {
       pvpSession.render(deltaMS, renderer);
     } else if (mode === "duo" && duoSession) {
       duoSession.render();
+    } else if (mode === "fourwide" && fourWidePractice) {
+      fourWidePractice.engine.update(deltaMS);
+      renderer.render(fourWidePractice.engine, deltaMS);
     }
   });
 }

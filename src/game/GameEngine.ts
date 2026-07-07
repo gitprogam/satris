@@ -81,6 +81,9 @@ export interface GameEngineOptions {
   // 공유 Board 안에서 이 엔진이 담당하는 열 구간의 시작 오프셋 (기본 0 = 솔로/1v1과 동일).
   // 스폰 위치와 좌우 이동 가능 범위가 전부 이 오프셋 기준 COLS폭 구간으로 제한된다.
   colOffset?: number;
+  // 4-Wide 연습용: 이동 가능 열 범위를 [min, max]로 직접 지정한다. 지정하면 colOffset
+  // 기반 COLS폭 자동계산 대신 이 값을 그대로 쓴다(스폰 열은 여전히 colOffset 기준).
+  colBounds?: [number, number];
 }
 
 export class GameEngine {
@@ -158,8 +161,12 @@ export class GameEngine {
   constructor(seed?: number, options?: GameEngineOptions) {
     const colOffset = options?.colOffset ?? 0;
     this.board = options?.board ?? new Board();
-    this.colMin = colOffset;
-    this.colMax = colOffset + COLS - 1;
+    if (options?.colBounds) {
+      [this.colMin, this.colMax] = options.colBounds;
+    } else {
+      this.colMin = colOffset;
+      this.colMax = colOffset + COLS - 1;
+    }
     this.spawnCol = SPAWN_COL + colOffset;
     this.bag = new SevenBag(seed);
     this.spawnNext();
