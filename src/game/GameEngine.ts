@@ -172,28 +172,25 @@ export class GameEngine {
     return cells.every(([r, c]) => this.board.isCellFree(r, c));
   }
 
-  // tetr.io의 스폰 위험 경고(X 표시)용: 다음 피스가 기본 스폰 위치에 놓일 때
-  // 이미 블록이 있어서 겹치게 될 칸들을 반환. 비어있으면 위험 없음.
+  // tetr.io의 스폰 위험 경고(X 표시)용. 다음 피스가 기본 스폰 위치에 온전히 놓일 수 없는
+  // 상태(= 지금 스폰하면 Block Out)일 때, 그 스폰 모양 전체(막힌 칸/빈 칸 구분 없이)를
+  // 반환한다 - 막힌 칸이 있다는 건 줄을 지워서 자연스럽게 자리를 못 만들면(Clutch Clear
+  // 실패) 다음 피스가 여기서 죽는다는 뜻이라, 모양 전체가 위험 표시 대상이다.
   getSpawnDangerCells(): [number, number][] {
     const [nextType] = this.bag.peek(1);
     if (!nextType) return [];
     const shape = PIECE_SHAPES[nextType][0];
-    return shape
-      .map(([r, c]) => [r + SPAWN_ROW, c + SPAWN_COL] as [number, number])
-      .filter(([r, c]) => !this.board.isCellFree(r, c));
+    const cells = shape.map(([r, c]) => [r + SPAWN_ROW, c + SPAWN_COL] as [number, number]);
+    const wouldBlockOut = cells.some(([r, c]) => !this.board.isCellFree(r, c));
+    return wouldBlockOut ? cells : [];
   }
 
-  // Clutch Clear: 스폰 위치가 막혀 있어도 곧바로 게임오버시키지 않고, 버퍼 위쪽으로
-  // 밀어 올려서라도 놓일 자리가 있으면 거기서 이어서 진행한다 (방금 지운 줄 덕분에
-  // 자리가 났을 수 있으므로). 맨 위(row 0)까지 올려도 안 되면 그때 진짜 게임오버.
+  // Block Out: 스폰 위치(SPAWN_ROW/SPAWN_COL)가 막혀 있으면 게임오버.
+  // Clutch Clear는 별도 로직이 필요 없다 - 방금 줄을 지웠다면 clearLines()가 이미
+  // 그 위의 줄들을 아래로 당겨놔서 스폰 자리가 자연스럽게 비어있게 되기 때문이다.
   private spawnNext() {
     const type = this.bag.next();
-    let spawnRow = SPAWN_ROW;
-    let piece: ActivePiece = { type, rotation: 0, row: spawnRow, col: SPAWN_COL };
-    while (!this.canPlace(piece) && spawnRow > 0) {
-      spawnRow--;
-      piece = { ...piece, row: spawnRow };
-    }
+    const piece: ActivePiece = { type, rotation: 0, row: SPAWN_ROW, col: SPAWN_COL };
     this.active = piece;
     this.canHold = true;
     this.gravityAccum = 0;
@@ -431,13 +428,13 @@ export class GameEngine {
       this.onAttackSent?.(remaining);
     }
     if (clearedCount === 0 && this.garbageQueue.length > 0) {
-      let overflowed = false;
+      // 가비지 때문에 기존 블록이 보드 밖으로 밀려나도 여기서 즉시 게임오버시키지 않는다.
+      // 그 정도로 심하게 쌓였다면 스폰 자리도 이미 막혀있을 것이므로, 다음 스폰 때
+      // Block Out으로 자연스럽게 게임이 끝난다.
       for (const chunk of this.garbageQueue) {
-        if (this.board.addGarbage(chunk.lines, chunk.holeCol)) overflowed = true;
+        this.board.addGarbage(chunk.lines, chunk.holeCol);
       }
       this.garbageQueue = [];
-      // Garbage Out: 가비지 때문에 이미 쌓여있던 블록이 보드 맨 위 밖으로 밀려났으면 게임오버
-      if (overflowed) this.triggerGameOver();
     }
   }
 
