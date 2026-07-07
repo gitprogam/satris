@@ -52,26 +52,19 @@ interface GarbageChunk {
   holeCol: number;
 }
 
-// PvP 가비지(공격) 물량표 - Jstris/Tetris Friends 계열 (검색으로 확인, 콤보 보너스는 아직 미포함)
-// btbBonusApplies는 applyScoring에서 이미 계산한 "이번 클리어가 B2B 1.5배 점수 보너스를
-// 받는지" 여부를 그대로 재사용 (같은 조건이므로 로직 중복 없이 그대로 씀)
-function getAttackLines(clearedCount: number, spin: "full" | "mini" | null, btbBonusApplies: boolean): number {
-  let attack = 0;
+// 클리어 타입별 기본 가비지(공격) 물량 - 콤보/B2B 배율이 붙기 전 base 값
+// (Jstris/Tetris Friends 계열 표, 검색으로 확인)
+function baseAttackFor(clearedCount: number, spin: "full" | "mini" | null): number {
   if (spin === "full") {
-    if (clearedCount === 2) attack = 4;
-    else if (clearedCount === 3) attack = 6;
-    // T-Spin(0줄) / T-Spin Single(1줄)은 검색으로 확인한 표 기준 0
-  } else if (spin === "mini") {
-    attack = 0;
-  } else {
-    if (clearedCount === 2) attack = 1;
-    else if (clearedCount === 3) attack = 2;
-    else if (clearedCount >= 4) attack = 4;
+    if (clearedCount === 2) return 4;
+    if (clearedCount === 3) return 6;
+    return 0; // T-Spin(0줄) / T-Spin Single(1줄)
   }
-  if (clearedCount > 0 && btbBonusApplies) {
-    attack += 1;
-  }
-  return attack;
+  if (spin === "mini") return 0;
+  if (clearedCount === 2) return 1;
+  if (clearedCount === 3) return 2;
+  if (clearedCount >= 4) return 4;
+  return 0;
 }
 
 const NEXT_PREVIEW = 5;
@@ -92,6 +85,8 @@ export class GameEngine {
   lines = 0;
   combo = -1;
   backToBack = false;
+  // B2B 스트릭 단계 수 (0=끊김). 4 이상부터 Surge가 쌓여서 스트릭이 끊길 때 한꺼번에 방출됨.
+  private b2bCount = 0;
 
   gameOver = false;
   paused = false;
@@ -147,6 +142,7 @@ export class GameEngine {
     this.lines = 0;
     this.combo = -1;
     this.backToBack = false;
+    this.b2bCount = 0;
     this.gameOver = false;
     this.paused = false;
     this.gravityAccum = 0;
@@ -176,14 +172,17 @@ export class GameEngine {
     return cells.every(([r, c]) => this.board.isCellFree(r, c));
   }
 
+  // Clutch Clear: 스폰 위치가 막혀 있어도 곧바로 게임오버시키지 않고, 버퍼 위쪽으로
+  // 밀어 올려서라도 놓일 자리가 있으면 거기서 이어서 진행한다 (방금 지운 줄 덕분에
+  // 자리가 났을 수 있으므로). 맨 위(row 0)까지 올려도 안 되면 그때 진짜 게임오버.
   private spawnNext() {
     const type = this.bag.next();
-    const piece: ActivePiece = {
-      type,
-      rotation: 0,
-      row: SPAWN_ROW,
-      col: SPAWN_COL,
-    };
+    let spawnRow = SPAWN_ROW;
+    let piece: ActivePiece = { type, rotation: 0, row: spawnRow, col: SPAWN_COL };
+    while (!this.canPlace(piece) && spawnRow > 0) {
+      spawnRow--;
+      piece = { ...piece, row: spawnRow };
+    }
     this.active = piece;
     this.canHold = true;
     this.gravityAccum = 0;
@@ -437,10 +436,7 @@ export class GameEngine {
     const clearedRows = this.board.clearLines();
     const clearedCount = clearedRows.length;
 
-    let attack = this.applyScoring(clearedCount, spin, spinPiece);
-    if (clearedCount > 0 && this.isBoardEmpty()) {
-      attack += 10; // 퍼펙트 클리어(올클리어) 보너스
-    }
+    const attack = this.applyScoring(clearedCount, spin, spinPiece);
     this.resolveGarbage(clearedCount, attack);
     this.onBoardChanged?.();
 
@@ -451,6 +447,8 @@ export class GameEngine {
   }
 
   private applyScoring(clearedCount: number, spin: "full" | "mini" | null, spinPiece: PieceType | null): number {
+    const isPerfectClear = clearedCount > 0 && this.isBoardEmpty();
+
     let type: ClearType | null = null;
     let base = 0;
 
@@ -479,19 +477,39 @@ export class GameEngine {
 
     if (type) {
       const isHardType = type === "tetris" || spin !== null;
-      const btbBonusApplies = this.backToBack && isHardType && clearedCount > 0;
-      const btbBonus = btbBonusApplies ? 1.5 : 1;
-      let gained = Math.floor(base * this.level * btbBonus);
+      const b2bWasActive = this.b2bCount > 0;
+      const scoreBtbMultiplier = b2bWasActive && isHardType && clearedCount > 0 ? 1.5 : 1;
+      let gained = Math.floor(base * this.level * scoreBtbMultiplier);
       if (this.combo > 0) {
         gained += 50 * this.combo * this.level;
       }
       this.score += gained;
 
-      attack = getAttackLines(clearedCount, spin, btbBonusApplies);
-
       if (clearedCount > 0) {
-        if (isHardType) this.backToBack = true;
-        else this.backToBack = false;
+        // 1) 콤보 배율 (tetr.io 공식: base>0이면 base*(1+0.25*combo),
+        //    base===0인 클리어가 콤보로 이어지면 2콤보부터 ln(1+1.25*combo))
+        attack = this.comboScaledAttack(baseAttackFor(clearedCount, spin), this.combo);
+
+        // 2) B2B Charging: 스트릭이 이어지는 공격마다 +1
+        if (b2bWasActive && isHardType) {
+          attack += 1;
+        }
+
+        // 3) B2B 스트릭/Surge 상태 갱신
+        if (isPerfectClear) {
+          // 올클리어는 클리어 종류와 무관하게 B2B를 +2 시킴
+          this.b2bCount += 2;
+          attack += 10; // 퍼펙트 클리어 자체의 즉시 보너스 (검색으로 확인한 관례적 수치)
+        } else if (isHardType) {
+          this.b2bCount += 1;
+        } else {
+          // 어려운 클리어가 아니라 스트릭이 끊김 -> 그동안 쌓인 Surge(B2B4 이상부터, 값=b2bCount)를 한꺼번에 방출
+          if (this.b2bCount >= 4) {
+            attack += this.b2bCount;
+          }
+          this.b2bCount = 0;
+        }
+        this.backToBack = this.b2bCount > 0;
       }
 
       this.lastClear = {
@@ -513,6 +531,20 @@ export class GameEngine {
     }
 
     return attack;
+  }
+
+  // tetr.io 콤보 배율 공식: base가 있으면 base*(1+0.25*combo).
+  // base가 0인 클리어(예: 싱글)가 콤보로 이어지는 경우엔 2콤보(combo>=2)부터
+  // ln(1+1.25*combo)로 대체된다. 반올림은 기본값인 내림(DOWN)을 사용.
+  private comboScaledAttack(base: number, combo: number): number {
+    if (combo <= 0) return base;
+    if (base > 0) {
+      return Math.floor(base * (1 + 0.25 * combo));
+    }
+    if (combo >= 2) {
+      return Math.floor(Math.log(1 + 1.25 * combo));
+    }
+    return 0;
   }
 
   setInput(dir: "left" | "right" | null) {
