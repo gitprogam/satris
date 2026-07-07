@@ -7,11 +7,12 @@ import { GameEngine } from "./GameEngine";
 // 줄을 지워 콤보를 이어가야 한다. 벽은 줄어들 때마다 자동으로 다시 채워져서 무한히
 // 반복 연습할 수 있다.
 //
-// 일반 모드(기본, 그냥 클릭): 우물이 완전히 빈 채로 시작하고, 콤보가 끊겨도 게임이
-// 끝나지 않고 콤보 카운터만 리셋된 채 계속 진행 - 진짜 블록아웃 때만 끝남.
+// 일반 모드(기본, 그냥 클릭): 시작할 때 우물에 T-스핀용 3블록 잔여물이 깔려있고,
+// 콤보가 끊겨도 게임이 끝나지 않고 콤보 카운터만 리셋된 채 계속 진행 - 진짜
+// 블록아웃 때만 끝남.
 // 이스터에그(hardcore=true, 4-Wide 메뉴 버튼 Shift+클릭): 원래(구) 버전 그대로 -
-// 시작할 때 우물에 T-스핀용 3블록 잔여물이 깔려있고, 콤보가 끊기는 순간 즉시
-// 게임오버. 두 모드는 서로 섞이지 않고 완전히 분리되어 있다.
+// 우물이 완전히 빈 채로 시작하고, 콤보가 끊기는 순간 즉시 게임오버. 두 모드는
+// 서로 섞이지 않고 완전히 분리되어 있다.
 export const WELL_WIDTH = 4;
 export const WELL_START = Math.floor((COLS - WELL_WIDTH) / 2);
 export const WELL_END = WELL_START + WELL_WIDTH - 1;
@@ -29,7 +30,7 @@ export class FourWidePractice {
     this.hardcore = hardcore;
     this.board = new Board(COLS);
     this.buildWalls();
-    if (this.hardcore) this.buildStartingResidue();
+    if (!this.hardcore) this.buildStartingResidue();
     this.engine = new GameEngine(seed, { board: this.board, colBounds: [WELL_START, WELL_END] });
     this.engine.onBoardChanged = () => this.afterLock();
   }
@@ -59,7 +60,7 @@ export class FourWidePractice {
     this.bestCombo = 0;
     this.prevCombo = -1;
     this.buildWalls();
-    if (this.hardcore) this.buildStartingResidue();
+    if (!this.hardcore) this.buildStartingResidue();
   }
 
   private wallHeight(): number {
