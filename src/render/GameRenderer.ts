@@ -16,6 +16,9 @@ const BOARD_W = COLS * CELL_SIZE;
 const BOARD_H = VISIBLE_ROWS * CELL_SIZE;
 const SIDE_PANEL_W = 170;
 const MARGIN = 24;
+// 스폰 위험 경고(X 표시)를 보여주기 위해 화면 밖 버퍼(vanish zone)를 살짝 보여주는 영역
+const VANISH_ROWS = 3;
+const VANISH_H = VANISH_ROWS * CELL_SIZE;
 
 const PLAIN_CLEAR_LABELS: Partial<Record<ClearType, string>> = {
   single: "SINGLE",
@@ -40,9 +43,20 @@ function clearLabel(type: ClearType, spinPiece: PieceType | null): string {
   return PLAIN_CLEAR_LABELS[type] ?? type.toUpperCase();
 }
 
+// 스폰 위험 경고: 해당 칸에 빨간 X 표시
+function drawDangerX(g: Graphics, x: number, y: number, size: number) {
+  const pad = size * 0.22;
+  g.moveTo(x + pad, y + pad).lineTo(x + size - pad, y + size - pad);
+  g.moveTo(x + size - pad, y + pad).lineTo(x + pad, y + size - pad);
+  g.stroke({ color: 0xff3b3b, width: 3 });
+}
+
 export class GameRenderer {
   app: Application;
   private boardLayer = new Container();
+  private mainBoardLayer = new Container();
+  private vanishBg = new Graphics();
+  private vanishGfx = new Graphics();
   private boardBg = new Graphics();
   private boardGfx = new Graphics();
   private garbageMeterGfx = new Graphics();
@@ -73,13 +87,27 @@ export class GameRenderer {
     app.stage.addChild(root);
 
     const totalW = SIDE_PANEL_W + MARGIN + BOARD_W + MARGIN + SIDE_PANEL_W;
-    const totalH = BOARD_H;
+    const totalH = VANISH_H + BOARD_H;
     root.x = Math.max(0, (app.screen.width - totalW) / 2);
     root.y = Math.max(0, (app.screen.height - totalH) / 2);
 
     // 보드 배경
     this.boardLayer.x = SIDE_PANEL_W + MARGIN;
     root.addChild(this.boardLayer);
+
+    // 스폰 위험 경고 영역 (화면 밖 버퍼를 살짝 보여줌) - 보드 바로 위
+    this.vanishBg.rect(0, 0, BOARD_W, VANISH_H).fill({ color: 0x140a0a });
+    for (let c = 1; c < COLS; c++) {
+      this.vanishBg.moveTo(c * CELL_SIZE, 0).lineTo(c * CELL_SIZE, VANISH_H);
+    }
+    this.vanishBg.stroke({ color: 0x2a1414, width: 1 });
+    this.vanishBg.rect(0, 0, BOARD_W, VANISH_H).stroke({ color: 0x4a2424, width: 2 });
+    this.boardLayer.addChild(this.vanishBg);
+    this.boardLayer.addChild(this.vanishGfx);
+
+    // 실제 플레이 영역 (버퍼 미리보기 아래로 배치)
+    this.mainBoardLayer.y = VANISH_H;
+    this.boardLayer.addChild(this.mainBoardLayer);
 
     this.boardBg.rect(0, 0, BOARD_W, BOARD_H).fill({ color: 0x0a0a12 });
     for (let c = 1; c < COLS; c++) {
@@ -90,13 +118,13 @@ export class GameRenderer {
     }
     this.boardBg.stroke({ color: 0x24243a, width: 1 });
     this.boardBg.rect(0, 0, BOARD_W, BOARD_H).stroke({ color: 0x4a4a6a, width: 2 });
-    this.boardLayer.addChild(this.boardBg);
-    this.boardLayer.addChild(this.boardGfx);
+    this.mainBoardLayer.addChild(this.boardBg);
+    this.mainBoardLayer.addChild(this.boardGfx);
 
     // PvP 가비지 미터 (보드 왼쪽에 붙는 얇은 주황 바 - 대기 중인 가비지 줄 수만큼 채워짐)
     this.garbageMeterGfx.x = -12;
     this.garbageMeterGfx.y = 0;
-    this.boardLayer.addChild(this.garbageMeterGfx);
+    this.mainBoardLayer.addChild(this.garbageMeterGfx);
 
     // Hold 패널 (왼쪽)
     const holdContainer = new Container();
@@ -189,7 +217,7 @@ export class GameRenderer {
     this.clearMsgText.x = BOARD_W / 2;
     this.clearMsgText.y = 12;
     this.clearMsgText.alpha = 0;
-    this.boardLayer.addChild(this.clearMsgText);
+    this.mainBoardLayer.addChild(this.clearMsgText);
 
     // 오버레이 (일시정지/게임오버)
     this.overlayBg.rect(0, 0, BOARD_W, BOARD_H).fill({ color: 0x000000, alpha: 0.7 });
@@ -211,7 +239,7 @@ export class GameRenderer {
     this.overlaySubText.y = BOARD_H / 2 + 24;
     this.overlayContainer.addChild(this.overlaySubText);
     this.overlayContainer.visible = false;
-    this.boardLayer.addChild(this.overlayContainer);
+    this.mainBoardLayer.addChild(this.overlayContainer);
   }
 
   private drawMiniPiece(g: Graphics, type: PieceType | null, boxW: number) {
@@ -233,6 +261,25 @@ export class GameRenderer {
   }
 
   render(engine: GameEngine, deltaMS: number) {
+    // 스폰 위험 경고 영역 (버퍼 미리보기 + 다음 피스가 겹칠 칸에 X 표시)
+    this.vanishGfx.clear();
+    for (let row = BUFFER_ROWS - VANISH_ROWS; row < BUFFER_ROWS; row++) {
+      const gridRow = engine.board.grid[row];
+      if (!gridRow) continue;
+      for (let col = 0; col < COLS; col++) {
+        const cell = gridRow[col];
+        if (cell) {
+          drawCell(this.vanishGfx, col * CELL_SIZE, (row - (BUFFER_ROWS - VANISH_ROWS)) * CELL_SIZE, CELL_SIZE, colorForCell(cell));
+        }
+      }
+    }
+    for (const [row, col] of engine.getSpawnDangerCells()) {
+      const vr = row - (BUFFER_ROWS - VANISH_ROWS);
+      if (vr >= 0 && vr < VANISH_ROWS) {
+        drawDangerX(this.vanishGfx, col * CELL_SIZE, vr * CELL_SIZE, CELL_SIZE);
+      }
+    }
+
     // PvP 가비지 미터
     this.garbageMeterGfx.clear();
     const pendingGarbage = engine.garbageQueue.reduce((sum, chunk) => sum + chunk.lines, 0);

@@ -172,6 +172,17 @@ export class GameEngine {
     return cells.every(([r, c]) => this.board.isCellFree(r, c));
   }
 
+  // tetr.io의 스폰 위험 경고(X 표시)용: 다음 피스가 기본 스폰 위치에 놓일 때
+  // 이미 블록이 있어서 겹치게 될 칸들을 반환. 비어있으면 위험 없음.
+  getSpawnDangerCells(): [number, number][] {
+    const [nextType] = this.bag.peek(1);
+    if (!nextType) return [];
+    const shape = PIECE_SHAPES[nextType][0];
+    return shape
+      .map(([r, c]) => [r + SPAWN_ROW, c + SPAWN_COL] as [number, number])
+      .filter(([r, c]) => !this.board.isCellFree(r, c));
+  }
+
   // Clutch Clear: 스폰 위치가 막혀 있어도 곧바로 게임오버시키지 않고, 버퍼 위쪽으로
   // 밀어 올려서라도 놓일 자리가 있으면 거기서 이어서 진행한다 (방금 지운 줄 덕분에
   // 자리가 났을 수 있으므로). 맨 위(row 0)까지 올려도 안 되면 그때 진짜 게임오버.
@@ -193,8 +204,8 @@ export class GameEngine {
     this.cutDas();
 
     if (!this.canPlace(piece)) {
-      this.gameOver = true;
-      this.onGameOver?.();
+      // Block Out: 자리를 아무리 위로 올려봐도 스폰할 자리가 없음
+      this.triggerGameOver();
     }
   }
 
@@ -420,11 +431,20 @@ export class GameEngine {
       this.onAttackSent?.(remaining);
     }
     if (clearedCount === 0 && this.garbageQueue.length > 0) {
+      let overflowed = false;
       for (const chunk of this.garbageQueue) {
-        this.board.addGarbage(chunk.lines, chunk.holeCol);
+        if (this.board.addGarbage(chunk.lines, chunk.holeCol)) overflowed = true;
       }
       this.garbageQueue = [];
+      // Garbage Out: 가비지 때문에 이미 쌓여있던 블록이 보드 맨 위 밖으로 밀려났으면 게임오버
+      if (overflowed) this.triggerGameOver();
     }
+  }
+
+  private triggerGameOver() {
+    if (this.gameOver) return;
+    this.gameOver = true;
+    this.onGameOver?.();
   }
 
   private lockPiece() {
@@ -433,6 +453,12 @@ export class GameEngine {
     const spinPiece = spin ? this.active.type : null;
     const cells = this.getCells(this.active);
     this.board.lockCells(cells, this.active.type);
+
+    // Lock Out: 방금 락된 피스가 전부 버퍼(화면 밖 vanish zone) 안에서 락되면 게임오버
+    if (cells.every(([row]) => row < BUFFER_ROWS)) {
+      this.triggerGameOver();
+    }
+
     const clearedRows = this.board.clearLines();
     const clearedCount = clearedRows.length;
 

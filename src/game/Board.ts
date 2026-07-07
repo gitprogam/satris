@@ -50,13 +50,17 @@ export class Board {
     return fullRows;
   }
 
-  // 맨 아래에 가비지 줄을 삽입 (holeCol만 비어있고 나머지는 꽉 찬 줄), 기존 줄은 위로 밀림
-  addGarbage(lines: number, holeCol: number) {
-    if (lines <= 0) return;
+  // 맨 아래에 가비지 줄을 삽입 (holeCol만 비어있고 나머지는 꽉 찬 줄), 기존 줄은 위로 밀림.
+  // 맨 위로 밀려나가면서 사라지는 줄에 채워진 셀이 하나라도 있었으면 true를 반환
+  // ("Garbage Out" - 가비지 때문에 블록이 보드 밖으로 밀려난 상태, 게임오버 조건).
+  addGarbage(lines: number, holeCol: number): boolean {
+    if (lines <= 0) return false;
+    const overflow = this.grid.slice(0, lines).some((row) => row.some((cell) => cell !== null));
     const garbageRows: Cell[][] = Array.from({ length: lines }, () =>
       Array.from({ length: COLS }, (_, c) => (c === holeCol ? null : "GARBAGE"))
     );
     this.grid = [...this.grid.slice(lines), ...garbageRows];
+    return overflow;
   }
 
   reset() {
