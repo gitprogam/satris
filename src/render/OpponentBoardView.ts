@@ -8,15 +8,19 @@ import { colorForCell, drawCell } from "./cellDraw";
 export class OpponentBoardView {
   container = new Container();
   private cellSize: number;
+  private width: number;
   private bg = new Graphics();
   private gfx = new Graphics();
   private label: Text;
   private grid: Cell[][] | null = null;
   private connected = false;
 
-  constructor(cellSize = 12) {
+  // width: 보드 폭(칸 수). 1v1 상대 미리보기는 기본 COLS(10), 2v2 상대팀 미리보기는
+  // 합체 보드 폭인 COLS*2(20)를 넘겨준다.
+  constructor(cellSize = 12, width: number = COLS) {
     this.cellSize = cellSize;
-    const w = COLS * cellSize;
+    this.width = width;
+    const w = width * cellSize;
     const h = VISIBLE_ROWS * cellSize;
 
     this.label = new Text({
@@ -46,7 +50,7 @@ export class OpponentBoardView {
     for (let row = BUFFER_ROWS; row < BUFFER_ROWS + VISIBLE_ROWS; row++) {
       const gridRow = this.grid[row];
       if (!gridRow) continue;
-      for (let col = 0; col < COLS; col++) {
+      for (let col = 0; col < this.width; col++) {
         const cell = gridRow[col];
         if (cell) {
           drawCell(this.gfx, col * this.cellSize, (row - BUFFER_ROWS) * this.cellSize, this.cellSize, colorForCell(cell));

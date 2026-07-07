@@ -1,4 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { generateRoomCode } from "./roomCode";
+import { send } from "./ws";
+import { handleDuoClose, handleDuoMessage } from "./duoRoom";
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -9,23 +12,6 @@ interface Room {
 
 const rooms = new Map<string, Room>();
 const socketRoom = new Map<WebSocket, string>();
-
-// 혼동되는 문자(0/O, 1/I/L) 제외한 방 코드용 문자셋
-const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
-function generateRoomCode(): string {
-  let code: string;
-  do {
-    code = Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join("");
-  } while (rooms.has(code));
-  return code;
-}
-
-function send(ws: WebSocket, message: unknown) {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(message));
-  }
-}
 
 function otherSocket(room: Room, ws: WebSocket): WebSocket | null {
   const [a, b] = room.sockets;
@@ -45,8 +31,13 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if (typeof msg.type === "string" && msg.type.startsWith("duo:")) {
+      handleDuoMessage(ws, msg);
+      return;
+    }
+
     if (msg.type === "create") {
-      const code = generateRoomCode();
+      const code = generateRoomCode((c) => rooms.has(c));
       rooms.set(code, { code, sockets: [ws, null] });
       socketRoom.set(ws, code);
       send(ws, { type: "created", code });
@@ -91,6 +82,8 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    handleDuoClose(ws);
+
     const roomCode = socketRoom.get(ws);
     socketRoom.delete(ws);
     if (!roomCode) return;

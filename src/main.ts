@@ -4,6 +4,7 @@ import { InputHandler } from "./game/InputHandler";
 import { GameRenderer } from "./render/GameRenderer";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type EngineSettings } from "./game/Settings";
 import { PvpSession } from "./pvp/PvpSession";
+import { DuoSession } from "./duo/DuoSession";
 import "./style.css";
 
 function setupSettingsPanel(getEngine: () => GameEngine | null, input: InputHandler) {
@@ -86,6 +87,7 @@ async function bootstrap() {
   const menuScreen = document.querySelector<HTMLDivElement>("#menu-screen")!;
   const menuSingleBtn = document.querySelector<HTMLButtonElement>("#menu-single")!;
   const menuPvpBtn = document.querySelector<HTMLButtonElement>("#menu-pvp")!;
+  const menuDuoBtn = document.querySelector<HTMLButtonElement>("#menu-duo")!;
 
   const pvpLobby = document.querySelector<HTMLDivElement>("#pvp-lobby")!;
   const pvpServerUrlInput = document.querySelector<HTMLInputElement>("#pvp-server-url")!;
@@ -96,27 +98,40 @@ async function bootstrap() {
   const pvpStatusText = document.querySelector<HTMLParagraphElement>("#pvp-status")!;
   const pvpBackBtn = document.querySelector<HTMLButtonElement>("#pvp-back")!;
 
+  const duoLobby = document.querySelector<HTMLDivElement>("#duo-lobby")!;
+  const duoServerUrlInput = document.querySelector<HTMLInputElement>("#duo-server-url")!;
+  const duoCreateBtn = document.querySelector<HTMLButtonElement>("#duo-create")!;
+  const duoRoomCodeText = document.querySelector<HTMLParagraphElement>("#duo-room-code")!;
+  const duoCodeInput = document.querySelector<HTMLInputElement>("#duo-code-input")!;
+  const duoJoinBtn = document.querySelector<HTMLButtonElement>("#duo-join")!;
+  const duoStatusText = document.querySelector<HTMLParagraphElement>("#duo-status")!;
+  const duoBackBtn = document.querySelector<HTMLButtonElement>("#duo-back")!;
+
   const pvpResultScreen = document.querySelector<HTMLDivElement>("#pvp-result")!;
   const pvpResultText = document.querySelector<HTMLHeadingElement>("#pvp-result-text")!;
   const pvpResultMenuBtn = document.querySelector<HTMLButtonElement>("#pvp-result-menu")!;
 
   pvpServerUrlInput.value = `ws://${location.hostname}:8080`;
+  duoServerUrlInput.value = `ws://${location.hostname}:8080`;
 
   const renderer = new GameRenderer(app);
 
-  let mode: "menu" | "single" | "pvp" = "menu";
+  let mode: "menu" | "single" | "pvp" | "duo" = "menu";
   let singleEngine: GameEngine | null = null;
   let singleInput: InputHandler | null = null;
   let pvpSession: PvpSession | null = null;
   let pvpInput: InputHandler | null = null;
+  let duoSession: DuoSession | null = null;
+  let duoInput: InputHandler | null = null;
 
   function showOnly(el: HTMLElement | null) {
-    [menuScreen, pvpLobby, pvpResultScreen].forEach((s) => s.classList.add("hidden"));
+    [menuScreen, pvpLobby, duoLobby, pvpResultScreen].forEach((s) => s.classList.add("hidden"));
     el?.classList.remove("hidden");
   }
 
   function returnToMenu() {
     mode = "menu";
+    renderer.container.visible = true;
     if (pvpSession) {
       pvpSession.disconnect();
       app.stage.removeChild(pvpSession.opponentView.container);
@@ -127,6 +142,16 @@ async function bootstrap() {
     pvpStatusText.textContent = "";
     pvpRoomCodeText.textContent = "";
     pvpCodeInput.value = "";
+    if (duoSession) {
+      duoSession.disconnect();
+      app.stage.removeChild(duoSession.renderer.container);
+      duoSession = null;
+    }
+    duoInput?.dispose();
+    duoInput = null;
+    duoStatusText.textContent = "";
+    duoRoomCodeText.textContent = "";
+    duoCodeInput.value = "";
     showOnly(menuScreen);
   }
 
@@ -177,8 +202,42 @@ async function bootstrap() {
     });
   }
 
+  function startDuoLobby() {
+    mode = "menu"; // 아직 매치는 시작 안 함, 로비 화면일 뿐
+    showOnly(duoLobby);
+    renderer.container.visible = false; // GameRenderer(싱글/1v1용)와 화면이 겹치지 않게 숨김
+    duoSession = new DuoSession(app);
+
+    duoSession.onRoomCreated = (code) => {
+      duoRoomCodeText.textContent = `방 코드: ${code}`;
+    };
+    duoSession.onWaiting = (filled, total) => {
+      duoStatusText.textContent = `${filled}/${total}명 대기 중...`;
+    };
+    duoSession.onJoinError = (reason) => {
+      duoStatusText.textContent = reason === "full" ? "이미 꽉 찬 방이에요." : "방을 찾을 수 없어요.";
+    };
+    duoSession.onMatchStart = () => {
+      mode = "duo";
+      showOnly(null);
+      duoInput = new InputHandler(duoSession!.controls);
+      duoInput.onPause = () => {};
+      duoInput.onRestart = () => {};
+    };
+    duoSession.onMatchEnd = (result) => {
+      pvpResultText.textContent = result === "win" ? "승리!" : "패배";
+      showOnly(pvpResultScreen);
+    };
+
+    duoStatusText.textContent = "서버에 연결하는 중...";
+    duoSession.connect(duoServerUrlInput.value).catch(() => {
+      duoStatusText.textContent = "서버에 연결할 수 없어요. 주소를 확인해주세요.";
+    });
+  }
+
   menuSingleBtn.addEventListener("click", startSingle);
   menuPvpBtn.addEventListener("click", startPvpLobby);
+  menuDuoBtn.addEventListener("click", startDuoLobby);
   pvpCreateBtn.addEventListener("click", () => {
     pvpStatusText.textContent = "방 만드는 중...";
     pvpSession?.createRoom();
@@ -192,6 +251,18 @@ async function bootstrap() {
   pvpBackBtn.addEventListener("click", returnToMenu);
   pvpResultMenuBtn.addEventListener("click", returnToMenu);
 
+  duoCreateBtn.addEventListener("click", () => {
+    duoStatusText.textContent = "방 만드는 중...";
+    duoSession?.createRoom();
+  });
+  duoJoinBtn.addEventListener("click", () => {
+    const code = duoCodeInput.value.trim();
+    if (!code) return;
+    duoStatusText.textContent = "참가하는 중...";
+    duoSession?.joinRoom(code);
+  });
+  duoBackBtn.addEventListener("click", returnToMenu);
+
   app.ticker.add((ticker) => {
     const deltaMS = ticker.deltaMS;
     if (mode === "single" && singleEngine) {
@@ -200,6 +271,8 @@ async function bootstrap() {
     } else if (mode === "pvp" && pvpSession) {
       pvpSession.update(deltaMS);
       pvpSession.render(deltaMS, renderer);
+    } else if (mode === "duo" && duoSession) {
+      duoSession.render();
     }
   });
 }

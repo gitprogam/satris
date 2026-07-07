@@ -73,14 +73,31 @@ const NEXT_PREVIEW = 5;
 const SPAWN_ROW = BUFFER_ROWS - 2;
 const SPAWN_COL = 3;
 
+export interface GameEngineOptions {
+  // 2v2 "합체 보드"용: 이 값을 주면 자기 Board를 새로 만들지 않고 넘겨받은 것을 공유한다
+  // (두 GameEngine이 같은 Board를 참조 -> 어느 쪽이 락하든 board.clearLines()가 전체
+  // 폭 기준으로 판정되므로 "합쳐서 한 줄" 메커닉이 저절로 성립함).
+  board?: Board;
+  // 공유 Board 안에서 이 엔진이 담당하는 열 구간의 시작 오프셋 (기본 0 = 솔로/1v1과 동일).
+  // 스폰 위치와 좌우 이동 가능 범위가 전부 이 오프셋 기준 COLS폭 구간으로 제한된다.
+  colOffset?: number;
+}
+
 export class GameEngine {
-  board = new Board();
+  board: Board;
   bag: SevenBag;
   active: ActivePiece | null = null;
   holdType: PieceType | null = null;
   canHold = true;
   lastActionWasRotate = false;
   lastKickIndex = 0;
+
+  // 공유 Board 안에서 이 엔진이 움직일 수 있는 열 범위. 기본(솔로/1v1)은 [0, COLS-1]로
+  // Board 자체의 폭과 같아서 사실상 제한이 없다. 2v2에서는 자기 절반 밖으로 못 나가게
+  // 막는 진짜 "벽" 역할을 한다 (스핀 킥/immobile 판정에도 자동으로 올바르게 반영됨).
+  private colMin: number;
+  private colMax: number;
+  private spawnCol: number;
 
   score = 0;
   level = 1;
@@ -90,6 +107,11 @@ export class GameEngine {
   // B2B 스트릭 단계 수 (0=끊김). 4 이상부터 Surge가 쌓여서 스트릭이 끊길 때 한꺼번에 방출됨.
   private b2bCount = 0;
 
+  // 실시간 플레이 스탯(tetr.io의 PPS/APM처럼) - 게임 시작부터 지금까지 누적 기준
+  piecesPlaced = 0;
+  totalAttackSent = 0;
+  elapsedMs = 0;
+
   gameOver = false;
   paused = false;
 
@@ -97,6 +119,11 @@ export class GameEngine {
   private lockTimer = 0;
   private lockResets = 0;
   private isGrounded = false;
+  // Move Reset(락 리셋) 카운터는 "피스가 실제로 더 깊은 줄로 내려갔을 때"만 초기화되어야 한다
+  // (tetr.io/가이드라인의 Extended Placement Lock Down 규칙). 이 값을 추적하지 않고
+  // "바닥에 붙었다 뜨었다 다시 붙었다"만으로 초기화하면, 180도 스핀처럼 킥으로 잠깐 떠올랐다가
+  // 같은 자리에 다시 착지하는 조작을 연타해서 락딜레이 리셋을 무한정 받는 버그가 생긴다.
+  private lowestRow = 0;
 
   // 입력 반복 (DAS/ARR) 상태
   private dasTimer: Record<"left" | "right", number> = { left: 0, right: 0 };
@@ -128,7 +155,12 @@ export class GameEngine {
   onAttackSent: ((lines: number) => void) | null = null;
   onBoardChanged: (() => void) | null = null;
 
-  constructor(seed?: number) {
+  constructor(seed?: number, options?: GameEngineOptions) {
+    const colOffset = options?.colOffset ?? 0;
+    this.board = options?.board ?? new Board();
+    this.colMin = colOffset;
+    this.colMax = colOffset + COLS - 1;
+    this.spawnCol = SPAWN_COL + colOffset;
     this.bag = new SevenBag(seed);
     this.spawnNext();
   }
@@ -145,6 +177,9 @@ export class GameEngine {
     this.combo = -1;
     this.backToBack = false;
     this.b2bCount = 0;
+    this.piecesPlaced = 0;
+    this.totalAttackSent = 0;
+    this.elapsedMs = 0;
     this.gameOver = false;
     this.paused = false;
     this.gravityAccum = 0;
@@ -171,7 +206,7 @@ export class GameEngine {
 
   private canPlace(piece: ActivePiece): boolean {
     const cells = this.getCells(piece);
-    return cells.every(([r, c]) => this.board.isCellFree(r, c));
+    return cells.every(([r, c]) => this.board.isCellFree(r, c) && c >= this.colMin && c <= this.colMax);
   }
 
   // tetr.io의 스폰 위험 경고(X 표시)용. 실제로 스폰이 막혔는지 여부가 아니라, 일반
@@ -193,7 +228,7 @@ export class GameEngine {
     if (stackHeight < VISIBLE_ROWS - 2) return [];
 
     const shape = PIECE_SHAPES[nextType][0];
-    return shape.map(([r, c]) => [r + SPAWN_ROW, c + SPAWN_COL] as [number, number]);
+    return shape.map(([r, c]) => [r + SPAWN_ROW, c + this.spawnCol] as [number, number]);
   }
 
   // Block Out: 스폰 위치(SPAWN_ROW/SPAWN_COL)가 막혀 있으면 게임오버.
@@ -201,12 +236,13 @@ export class GameEngine {
   // 그 위의 줄들을 아래로 당겨놔서 스폰 자리가 자연스럽게 비어있게 되기 때문이다.
   private spawnNext() {
     const type = this.bag.next();
-    const piece: ActivePiece = { type, rotation: 0, row: SPAWN_ROW, col: SPAWN_COL };
+    const piece: ActivePiece = { type, rotation: 0, row: SPAWN_ROW, col: this.spawnCol };
     this.active = piece;
     this.canHold = true;
     this.gravityAccum = 0;
     this.lockTimer = 0;
     this.lockResets = 0;
+    this.lowestRow = SPAWN_ROW;
     this.isGrounded = false;
     this.lastActionWasRotate = false;
     this.cutDas();
@@ -264,20 +300,27 @@ export class GameEngine {
   // 오기도 전에 허공에서 그대로 고정("미노가 공중에 뜨는" 버그)돼버린다.
   private onSuccessfulMove() {
     if (!this.active) return;
-    const wasGrounded = this.isGrounded;
-    const nowGrounded = !this.canPlace({ ...this.active, row: this.active.row + 1 });
 
-    if (nowGrounded && wasGrounded) {
-      if (this.lockResets < MAX_LOCK_RESETS) {
-        this.lockTimer = 0;
-        this.lockResets++;
-      }
-    } else if (nowGrounded && !wasGrounded) {
-      this.lockTimer = 0;
+    // 실제로 이전보다 더 깊은 줄에 도달했을 때만 Move Reset 카운터/타이머를 초기화한다
+    // (가이드라인 Extended Placement Lock Down 규칙 - "새로운 줄로 내려갔을 때만" 리셋).
+    if (this.active.row > this.lowestRow) {
+      this.lowestRow = this.active.row;
       this.lockResets = 0;
-    } else {
       this.lockTimer = 0;
     }
+
+    const nowGrounded = !this.canPlace({ ...this.active, row: this.active.row + 1 });
+
+    if (nowGrounded && this.lockResets < MAX_LOCK_RESETS) {
+      this.lockTimer = 0;
+      this.lockResets++;
+    }
+    // 그 외의 경우(허공에 뜬 상태 / 리셋 한도 소진)에는 lockTimer를 건드리지 않는다.
+    // 허공 상태에서는 update()가 어차피 lockTimer를 증가시키지 않으니 그냥 멈춰있을 뿐이고,
+    // 여기서 0으로 지워버리면 S/Z/T 등 회전 상태 0↔2가 한 줄 어긋나 있는 피스가 180도
+    // 회전을 반복해 "접지↔공중"을 오갈 때 lockTimer가 매 프레임 지워져서 리셋 한도를
+    // 다 쓰고도 500ms를 절대 못 채우는(무한 생존) 버그가 생긴다. 지우지 않고 멈춰만 두면
+    // 접지 상태로 돌아올 때마다 이어서 쌓여 결국 락된다.
 
     this.isGrounded = nowGrounded;
   }
@@ -351,11 +394,12 @@ export class GameEngine {
         type: swapType,
         rotation: 0,
         row: SPAWN_ROW,
-        col: SPAWN_COL,
+        col: this.spawnCol,
       };
       this.gravityAccum = 0;
       this.lockTimer = 0;
       this.lockResets = 0;
+      this.lowestRow = SPAWN_ROW;
       this.isGrounded = false;
       this.lastActionWasRotate = false;
     }
@@ -461,11 +505,13 @@ export class GameEngine {
     const spinPiece = spin ? this.active.type : null;
     const cells = this.getCells(this.active);
     this.board.lockCells(cells, this.active.type);
+    this.piecesPlaced++;
 
     const clearedRows = this.board.clearLines();
     const clearedCount = clearedRows.length;
 
     const attack = this.applyScoring(clearedCount, spin, spinPiece);
+    this.totalAttackSent += attack;
     this.resolveGarbage(clearedCount, attack);
     this.onBoardChanged?.();
 
@@ -473,6 +519,16 @@ export class GameEngine {
     if (!this.gameOver) {
       this.spawnNext();
     }
+  }
+
+  // tetr.io처럼 게임 시작부터 지금까지 누적 기준의 초당 피스 배치 수(PPS)
+  getPPS(): number {
+    return this.elapsedMs > 0 ? this.piecesPlaced / (this.elapsedMs / 1000) : 0;
+  }
+
+  // tetr.io처럼 게임 시작부터 지금까지 누적 기준의 분당 공격(가비지) 전송량(APM)
+  getAPM(): number {
+    return this.elapsedMs > 0 ? this.totalAttackSent / (this.elapsedMs / 60000) : 0;
   }
 
   private applyScoring(clearedCount: number, spin: "full" | "mini" | null, spinPiece: PieceType | null): number {
@@ -597,6 +653,8 @@ export class GameEngine {
   update(deltaMs: number) {
     if (this.gameOver || this.paused || !this.active) return;
 
+    this.elapsedMs += deltaMs;
+
     // DAS/ARR 처리
     if (this.heldDir) {
       if (this.dasCutTimer > 0) {
@@ -626,6 +684,11 @@ export class GameEngine {
         this.score += ghostRow - this.active.row;
         this.active.row = ghostRow;
         this.lastActionWasRotate = false;
+        if (this.active.row > this.lowestRow) {
+          this.lowestRow = this.active.row;
+          this.lockResets = 0;
+          this.lockTimer = 0;
+        }
       }
       this.isGrounded = true;
       this.gravityAccum = 0;
@@ -641,6 +704,11 @@ export class GameEngine {
           if (this.softDropActive) this.score += 1;
           this.isGrounded = false;
           this.lastActionWasRotate = false;
+          if (this.active.row > this.lowestRow) {
+            this.lowestRow = this.active.row;
+            this.lockResets = 0;
+            this.lockTimer = 0;
+          }
         } else {
           this.isGrounded = true;
           break;

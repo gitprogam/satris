@@ -180,7 +180,8 @@ canvas {
   text-align: left;
 }
 
-#pvp-room-code {
+#pvp-room-code,
+#duo-room-code {
   font-size: 22px;
   font-weight: 800;
   letter-spacing: 4px;

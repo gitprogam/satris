@@ -37,6 +37,7 @@
       <div class="menu-actions">
         <button id="menu-single" type="button">싱글플레이</button>
         <button id="menu-pvp" type="button">PvP 대전</button>
+        <button id="menu-duo" type="button">2v2 대전</button>
       </div>
     </div>
 
@@ -56,6 +57,24 @@
       </div>
       <p id="pvp-status" class="pvp-status"></p>
       <button id="pvp-back" type="button" class="pvp-back">메뉴로</button>
+    </div>
+
+    <div id="duo-lobby" class="overlay-screen hidden">
+      <h2>2v2 대전 <span class="hint">(팀원과 보드를 나눠 쓰는 합체 보드 모드)</span></h2>
+      <label>
+        서버 주소
+        <input type="text" id="duo-server-url" />
+      </label>
+      <div class="lobby-section">
+        <button id="duo-create" type="button">방 만들기</button>
+        <p id="duo-room-code"></p>
+      </div>
+      <div class="lobby-section lobby-join">
+        <input type="text" id="duo-code-input" placeholder="방 코드 입력" maxlength="5" />
+        <button id="duo-join" type="button">참가하기</button>
+      </div>
+      <p id="duo-status" class="pvp-status"></p>
+      <button id="duo-back" type="button" class="pvp-back">메뉴로</button>
     </div>
 
     <div id="pvp-result" class="overlay-screen hidden">

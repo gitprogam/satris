@@ -5,21 +5,25 @@ export type Cell = PieceType | "GARBAGE" | null;
 
 export class Board {
   grid: Cell[][];
+  // 보드 폭. 기본값은 솔로/1v1용 COLS(10). 2v2 "합체 보드"는 COLS*2(20)짜리 Board
+  // 하나를 두 GameEngine이 공유해서 쓴다 (src/game/GameEngine.ts 참고).
+  width: number;
 
-  constructor() {
-    this.grid = Board.emptyGrid();
+  constructor(width: number = COLS) {
+    this.width = width;
+    this.grid = this.emptyGrid();
   }
 
-  static emptyGrid(): Cell[][] {
-    return Array.from({ length: TOTAL_ROWS }, () => Array<Cell>(COLS).fill(null));
+  private emptyGrid(): Cell[][] {
+    return Array.from({ length: TOTAL_ROWS }, () => Array<Cell>(this.width).fill(null));
   }
 
   isInsideCols(col: number): boolean {
-    return col >= 0 && col < COLS;
+    return col >= 0 && col < this.width;
   }
 
   isCellFree(row: number, col: number): boolean {
-    if (col < 0 || col >= COLS) return false;
+    if (col < 0 || col >= this.width) return false;
     if (row >= TOTAL_ROWS) return false;
     if (row < 0) return true; // 버퍼 위쪽은 항상 비어있다고 취급
     return this.grid[row][col] === null;
@@ -27,7 +31,7 @@ export class Board {
 
   lockCells(cells: [number, number][], type: PieceType) {
     for (const [row, col] of cells) {
-      if (row >= 0 && row < TOTAL_ROWS && col >= 0 && col < COLS) {
+      if (row >= 0 && row < TOTAL_ROWS && col >= 0 && col < this.width) {
         this.grid[row][col] = type;
       }
     }
@@ -45,7 +49,7 @@ export class Board {
 
     const fullSet = new Set(fullRows);
     const remaining = this.grid.filter((_, idx) => !fullSet.has(idx));
-    const newRows = Array.from({ length: fullRows.length }, () => Array<Cell>(COLS).fill(null));
+    const newRows = Array.from({ length: fullRows.length }, () => Array<Cell>(this.width).fill(null));
     this.grid = [...newRows, ...remaining];
     return fullRows;
   }
@@ -57,13 +61,13 @@ export class Board {
     if (lines <= 0) return false;
     const overflow = this.grid.slice(0, lines).some((row) => row.some((cell) => cell !== null));
     const garbageRows: Cell[][] = Array.from({ length: lines }, () =>
-      Array.from({ length: COLS }, (_, c) => (c === holeCol ? null : "GARBAGE"))
+      Array.from({ length: this.width }, (_, c) => (c === holeCol ? null : "GARBAGE"))
     );
     this.grid = [...this.grid.slice(lines), ...garbageRows];
     return overflow;
   }
 
   reset() {
-    this.grid = Board.emptyGrid();
+    this.grid = this.emptyGrid();
   }
 }

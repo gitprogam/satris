@@ -1,4 +1,15 @@
-import { GameEngine } from "./GameEngine";
+// InputHandler가 실제로 필요로 하는 GameEngine의 부분 집합. 이렇게 인터페이스로
+// 뽑아두면 2v2 듀오 모드처럼 로컬 GameEngine이 아니라 서버로 입력을 전송하는
+// 얇은 어댑터(DuoControlsAdapter)도 동일한 키 입력 로직을 그대로 재사용할 수 있다.
+export interface GameControls {
+  setInput(dir: "left" | "right" | null): void;
+  softDrop(active: boolean): void;
+  rotate(dir: 1 | -1): void;
+  rotate180(): void;
+  hardDrop(): void;
+  hold(): void;
+  readonly gameOver: boolean;
+}
 
 export class InputHandler {
   private heldKeys = new Set<string>();
@@ -7,10 +18,10 @@ export class InputHandler {
   onPause: (() => void) | null = null;
   onRestart: (() => void) | null = null;
   onToggleSettings: (() => void) | null = null;
-  private engine: GameEngine;
+  private engine: GameControls;
   private settingsOpen = false;
 
-  constructor(engine: GameEngine) {
+  constructor(engine: GameControls) {
     this.engine = engine;
     window.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("keyup", this.handleKeyUp);

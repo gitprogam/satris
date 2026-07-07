@@ -1,0 +1,140 @@
+import type { Cell } from "../game/Board";
+import type { ActivePiece } from "../game/GameEngine";
+import type { PieceType } from "../game/constants";
+import type { EngineSettings } from "../game/Settings";
+
+export type DuoJoinErrorReason = "not_found" | "full";
+export type DuoTeam = "A" | "B";
+
+export interface DuoPlayerState {
+  active: ActivePiece | null;
+  ghostRow: number | null;
+  hold: PieceType | null;
+  canHold: boolean;
+  next: PieceType[];
+  score: number;
+  level: number;
+  lines: number;
+  combo: number;
+  gameOver: boolean;
+  pps: number;
+  apm: number;
+  garbageQueueLines: number;
+}
+
+export interface DuoStateMessage {
+  team: DuoTeam;
+  grid: Cell[][];
+  players: [DuoPlayerState, DuoPlayerState];
+}
+
+// 2v2 "합체 보드" 모드용 클라이언트. 1v1의 PvpClient와 달리 이쪽은 서버가 권위형이라
+// 보드/공격을 보내는 게 아니라 **입력만 보내고, 서버가 매 틱 계산한 상태를 받기만** 한다.
+export class DuoClient {
+  private ws: WebSocket | null = null;
+
+  onCreated: ((code: string) => void) | null = null;
+  onJoinError: ((reason: DuoJoinErrorReason) => void) | null = null;
+  onWaiting: ((filled: number, total: number) => void) | null = null;
+  onMatchStart: ((team: DuoTeam, slot: 0 | 1) => void) | null = null;
+  onState: ((state: DuoStateMessage) => void) | null = null;
+  onEnemyBoard: ((grid: Cell[][]) => void) | null = null;
+  onTeamOver: ((result: "win" | "lose") => void) | null = null;
+  onConnectError: (() => void) | null = null;
+
+  connect(url: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      this.ws = ws;
+
+      ws.onopen = () => resolve();
+      ws.onerror = () => {
+        this.onConnectError?.();
+        reject(new Error("듀오 서버에 연결할 수 없습니다."));
+      };
+      ws.onmessage = (event) => this.handleMessage(event.data);
+    });
+  }
+
+  private handleMessage(raw: string) {
+    let msg: any;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    switch (msg.type) {
+      case "duo:created":
+        this.onCreated?.(msg.code);
+        break;
+      case "duo:joinError":
+        this.onJoinError?.(msg.reason);
+        break;
+      case "duo:waiting":
+        this.onWaiting?.(msg.filled, msg.total);
+        break;
+      case "duo:matchStart":
+        this.onMatchStart?.(msg.team, msg.slot);
+        break;
+      case "duo:state":
+        this.onState?.(msg as DuoStateMessage);
+        break;
+      case "duo:enemyBoard":
+        this.onEnemyBoard?.(msg.grid);
+        break;
+      case "duo:teamOver":
+        this.onTeamOver?.(msg.result);
+        break;
+    }
+  }
+
+  private send(message: unknown) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+
+  createRoom() {
+    this.send({ type: "duo:create" });
+  }
+
+  joinRoom(code: string) {
+    this.send({ type: "duo:join", code: code.toUpperCase() });
+  }
+
+  move(dir: "left" | "right" | null) {
+    this.send({ type: "duo:input", action: "move", dir });
+  }
+
+  softDrop(active: boolean) {
+    this.send({ type: "duo:input", action: "softDrop", active });
+  }
+
+  rotate(dir: 1 | -1) {
+    this.send({ type: "duo:input", action: "rotate", dir });
+  }
+
+  rotate180() {
+    this.send({ type: "duo:input", action: "rotate180" });
+  }
+
+  hardDrop() {
+    this.send({ type: "duo:input", action: "hardDrop" });
+  }
+
+  hold() {
+    this.send({ type: "duo:input", action: "hold" });
+  }
+
+  // 서버 권위형 모드라 DAS/ARR/SDF/DCD 설정이 서버 쪽 엔진에 적용돼야 함 - 매치 시작 후
+  // 한 번 보내서 내 슬롯의 엔진에 반영시킨다.
+  sendSettings(settings: EngineSettings) {
+    this.send({ type: "duo:settings", settings });
+  }
+
+  disconnect() {
+    this.ws?.close();
+    this.ws = null;
+  }
+}

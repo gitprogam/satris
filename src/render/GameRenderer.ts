@@ -53,6 +53,9 @@ function drawDangerX(g: Graphics, x: number, y: number, size: number) {
 
 export class GameRenderer {
   app: Application;
+  // main.ts가 싱글/1v1이 아닌 모드(2v2 듀오 등)로 전환할 때 이 렌더러의 화면을 통째로
+  // 숨길 수 있도록 루트 컨테이너를 노출한다.
+  container: Container;
   private boardLayer = new Container();
   private mainBoardLayer = new Container();
   private vanishBg = new Graphics();
@@ -70,6 +73,8 @@ export class GameRenderer {
   private linesText: Text;
   private clearMsgText: Text;
   private comboText: Text;
+  private ppsText: Text;
+  private apmText: Text;
   private holdLabel: Text;
   private nextLabel: Text;
   private overlayContainer = new Container();
@@ -84,6 +89,7 @@ export class GameRenderer {
     this.app = app;
 
     const root = new Container();
+    this.container = root;
     app.stage.addChild(root);
 
     const totalW = SIDE_PANEL_W + MARGIN + BOARD_W + MARGIN + SIDE_PANEL_W;
@@ -185,6 +191,21 @@ export class GameRenderer {
     });
     this.comboText.y = 330;
     holdContainer.addChild(this.comboText);
+
+    // 실시간 플레이 스탯 (tetr.io의 PPS/APM처럼 그리드 왼쪽에 표시)
+    const ppsLabel = new Text({ text: "PPS", style: labelStyle });
+    ppsLabel.y = 368;
+    holdContainer.addChild(ppsLabel);
+    this.ppsText = new Text({ text: "0.00", style: statStyle });
+    this.ppsText.y = 390;
+    holdContainer.addChild(this.ppsText);
+
+    const apmLabel = new Text({ text: "APM", style: labelStyle });
+    apmLabel.y = 428;
+    holdContainer.addChild(apmLabel);
+    this.apmText = new Text({ text: "0.0", style: statStyle });
+    this.apmText.y = 450;
+    holdContainer.addChild(this.apmText);
 
     // Next 패널 (오른쪽)
     const nextContainer = new Container();
@@ -355,6 +376,8 @@ export class GameRenderer {
     this.levelText.text = String(engine.level);
     this.linesText.text = String(engine.lines);
     this.comboText.text = engine.combo > 0 ? `${engine.combo} COMBO` : "";
+    this.ppsText.text = engine.getPPS().toFixed(2);
+    this.apmText.text = engine.getAPM().toFixed(1);
 
     // 클리어 메시지 애니메이션
     if (engine.lastClear && engine.lastClear.id !== this.lastClearId) {
