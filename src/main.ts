@@ -178,10 +178,10 @@ async function bootstrap() {
     setupSettingsPanel(() => singleEngine, singleInput);
   }
 
-  function startFourWidePractice() {
+  function startFourWidePractice(hardcore: boolean) {
     mode = "fourwide";
     showOnly(null);
-    fourWidePractice = new FourWidePractice();
+    fourWidePractice = new FourWidePractice(undefined, hardcore);
     fourWideInput = new InputHandler(fourWidePractice.engine);
     fourWideInput.onPause = () => {
       const engine = fourWidePractice!.engine;
@@ -262,7 +262,8 @@ async function bootstrap() {
   menuSingleBtn.addEventListener("click", startSingle);
   menuPvpBtn.addEventListener("click", startPvpLobby);
   menuDuoBtn.addEventListener("click", startDuoLobby);
-  menu4WideBtn.addEventListener("click", startFourWidePractice);
+  // Shift+클릭하면 이스터에그로 예전 하드코어 버전(콤보 끊기면 즉시 게임오버) 진입
+  menu4WideBtn.addEventListener("click", (e) => startFourWidePractice(e.shiftKey));
   pvpCreateBtn.addEventListener("click", () => {
     pvpStatusText.textContent = "방 만드는 중...";
     pvpSession?.createRoom();
