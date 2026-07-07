@@ -23,7 +23,7 @@
         <input type="number" id="set-sdf" min="5" max="41" step="1" />
       </label>
       <label>
-        DCD <span class="hint">(DAS Cancel Delay, ms)</span>
+        DCD <span class="hint">(DAS Cut Delay, ms)</span>
         <input type="number" id="set-dcd" min="0" max="300" step="1" />
       </label>
       <div class="settings-actions">
@@ -31,6 +31,38 @@
         <button id="settings-close" type="button">닫기</button>
       </div>
     </div>
+
+    <div id="menu-screen" class="overlay-screen">
+      <h1>사트리스</h1>
+      <div class="menu-actions">
+        <button id="menu-single" type="button">싱글플레이</button>
+        <button id="menu-pvp" type="button">PvP 대전</button>
+      </div>
+    </div>
+
+    <div id="pvp-lobby" class="overlay-screen hidden">
+      <h2>PvP 대전</h2>
+      <label>
+        서버 주소
+        <input type="text" id="pvp-server-url" />
+      </label>
+      <div class="lobby-section">
+        <button id="pvp-create" type="button">방 만들기</button>
+        <p id="pvp-room-code"></p>
+      </div>
+      <div class="lobby-section lobby-join">
+        <input type="text" id="pvp-code-input" placeholder="방 코드 입력" maxlength="5" />
+        <button id="pvp-join" type="button">참가하기</button>
+      </div>
+      <p id="pvp-status" class="pvp-status"></p>
+      <button id="pvp-back" type="button" class="pvp-back">메뉴로</button>
+    </div>
+
+    <div id="pvp-result" class="overlay-screen hidden">
+      <h2 id="pvp-result-text"></h2>
+      <button id="pvp-result-menu" type="button">메뉴로</button>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

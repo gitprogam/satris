@@ -3,9 +3,10 @@ import { GameEngine } from "./game/GameEngine";
 import { InputHandler } from "./game/InputHandler";
 import { GameRenderer } from "./render/GameRenderer";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type EngineSettings } from "./game/Settings";
+import { PvpSession } from "./pvp/PvpSession";
 import "./style.css";
 
-function setupSettingsPanel(engine: GameEngine, input: InputHandler) {
+function setupSettingsPanel(getEngine: () => GameEngine | null, input: InputHandler) {
   const panel = document.querySelector<HTMLDivElement>("#settings-panel")!;
   const dasInput = document.querySelector<HTMLInputElement>("#set-das")!;
   const arrInput = document.querySelector<HTMLInputElement>("#set-arr")!;
@@ -31,11 +32,13 @@ function setupSettingsPanel(engine: GameEngine, input: InputHandler) {
       sdf: Math.min(41, Math.max(5, Number(sdfInput.value) || DEFAULT_SETTINGS.sdf)),
       dcd: Number(dcdInput.value) || 0,
     };
-    engine.applySettings(settings);
+    getEngine()?.applySettings(settings);
     saveSettings(settings);
   }
 
   function open() {
+    const engine = getEngine();
+    if (!engine) return;
     isOpen = true;
     wasPaused = engine.paused;
     engine.paused = true;
@@ -44,14 +47,14 @@ function setupSettingsPanel(engine: GameEngine, input: InputHandler) {
   }
 
   function close() {
+    const engine = getEngine();
     isOpen = false;
-    engine.paused = wasPaused;
+    if (engine) engine.paused = wasPaused;
     input.setSettingsOpen(false);
     panel.classList.add("hidden");
   }
 
   populateInputs(loadSettings());
-  engine.applySettings(loadSettings());
 
   [dasInput, arrInput, sdfInput, dcdInput].forEach((el) => {
     el.addEventListener("input", readAndApply);
@@ -79,23 +82,124 @@ async function bootstrap() {
   const appEl = document.querySelector<HTMLDivElement>("#app")!;
   appEl.appendChild(app.canvas);
 
-  const engine = new GameEngine();
+  const menuScreen = document.querySelector<HTMLDivElement>("#menu-screen")!;
+  const menuSingleBtn = document.querySelector<HTMLButtonElement>("#menu-single")!;
+  const menuPvpBtn = document.querySelector<HTMLButtonElement>("#menu-pvp")!;
+
+  const pvpLobby = document.querySelector<HTMLDivElement>("#pvp-lobby")!;
+  const pvpServerUrlInput = document.querySelector<HTMLInputElement>("#pvp-server-url")!;
+  const pvpCreateBtn = document.querySelector<HTMLButtonElement>("#pvp-create")!;
+  const pvpRoomCodeText = document.querySelector<HTMLParagraphElement>("#pvp-room-code")!;
+  const pvpCodeInput = document.querySelector<HTMLInputElement>("#pvp-code-input")!;
+  const pvpJoinBtn = document.querySelector<HTMLButtonElement>("#pvp-join")!;
+  const pvpStatusText = document.querySelector<HTMLParagraphElement>("#pvp-status")!;
+  const pvpBackBtn = document.querySelector<HTMLButtonElement>("#pvp-back")!;
+
+  const pvpResultScreen = document.querySelector<HTMLDivElement>("#pvp-result")!;
+  const pvpResultText = document.querySelector<HTMLHeadingElement>("#pvp-result-text")!;
+  const pvpResultMenuBtn = document.querySelector<HTMLButtonElement>("#pvp-result-menu")!;
+
+  pvpServerUrlInput.value = `ws://${location.hostname}:8080`;
+
   const renderer = new GameRenderer(app);
 
-  const input = new InputHandler(engine);
-  input.onPause = () => {
-    if (!engine.gameOver) engine.paused = !engine.paused;
-  };
-  input.onRestart = () => {
-    engine.reset();
-  };
+  let mode: "menu" | "single" | "pvp" = "menu";
+  let singleEngine: GameEngine | null = null;
+  let singleInput: InputHandler | null = null;
+  let pvpSession: PvpSession | null = null;
+  let pvpInput: InputHandler | null = null;
 
-  setupSettingsPanel(engine, input);
+  function showOnly(el: HTMLElement | null) {
+    [menuScreen, pvpLobby, pvpResultScreen].forEach((s) => s.classList.add("hidden"));
+    el?.classList.remove("hidden");
+  }
+
+  function returnToMenu() {
+    mode = "menu";
+    if (pvpSession) {
+      pvpSession.disconnect();
+      app.stage.removeChild(pvpSession.opponentView.container);
+      pvpSession = null;
+    }
+    pvpInput?.dispose();
+    pvpInput = null;
+    pvpStatusText.textContent = "";
+    pvpRoomCodeText.textContent = "";
+    pvpCodeInput.value = "";
+    showOnly(menuScreen);
+  }
+
+  function startSingle() {
+    mode = "single";
+    showOnly(null);
+    singleEngine = new GameEngine();
+    singleInput = new InputHandler(singleEngine);
+    singleInput.onPause = () => {
+      if (!singleEngine!.gameOver) singleEngine!.paused = !singleEngine!.paused;
+    };
+    singleInput.onRestart = () => singleEngine!.reset();
+    setupSettingsPanel(() => singleEngine, singleInput);
+  }
+
+  function startPvpLobby() {
+    mode = "menu"; // 아직 매치는 시작 안 함, 로비 화면일 뿐
+    showOnly(pvpLobby);
+    pvpSession = new PvpSession(app);
+    pvpSession.opponentView.container.position.set(20, 20);
+
+    pvpSession.onRoomCreated = (code) => {
+      pvpRoomCodeText.textContent = `방 코드: ${code}`;
+      pvpStatusText.textContent = "상대방을 기다리는 중...";
+    };
+    pvpSession.onJoinError = (reason) => {
+      pvpStatusText.textContent = reason === "full" ? "이미 꽉 찬 방이에요." : "방을 찾을 수 없어요.";
+    };
+    pvpSession.onMatchStart = () => {
+      mode = "pvp";
+      showOnly(null);
+      pvpInput = new InputHandler(pvpSession!.engine!);
+      pvpInput.onPause = () => {
+        const engine = pvpSession!.engine!;
+        if (!engine.gameOver) engine.paused = !engine.paused;
+      };
+      pvpInput.onRestart = () => {};
+      setupSettingsPanel(() => pvpSession?.engine ?? null, pvpInput);
+    };
+    pvpSession.onMatchEnd = (result) => {
+      pvpResultText.textContent = result === "win" ? "승리!" : "패배";
+      showOnly(pvpResultScreen);
+    };
+
+    pvpStatusText.textContent = "서버에 연결하는 중...";
+    pvpSession.connect(pvpServerUrlInput.value).catch(() => {
+      pvpStatusText.textContent = "서버에 연결할 수 없어요. 주소를 확인해주세요.";
+    });
+  }
+
+  menuSingleBtn.addEventListener("click", startSingle);
+  menuPvpBtn.addEventListener("click", startPvpLobby);
+  pvpCreateBtn.addEventListener("click", () => {
+    pvpStatusText.textContent = "방 만드는 중...";
+    pvpSession?.createRoom();
+  });
+  pvpJoinBtn.addEventListener("click", () => {
+    const code = pvpCodeInput.value.trim();
+    if (!code) return;
+    pvpStatusText.textContent = "참가하는 중...";
+    pvpSession?.joinRoom(code);
+  });
+  pvpBackBtn.addEventListener("click", returnToMenu);
+  pvpResultMenuBtn.addEventListener("click", returnToMenu);
 
   app.ticker.add((ticker) => {
     const deltaMS = ticker.deltaMS;
-    engine.update(deltaMS);
-    renderer.render(engine, deltaMS);
+    if (mode === "single" && singleEngine) {
+      singleEngine.update(deltaMS);
+      renderer.render(singleEngine, deltaMS);
+    } else if (mode === "pvp" && pvpSession) {
+      pvpSession.update(deltaMS);
+      pvpSession.render(deltaMS, renderer);
+    }
   });
 }
 

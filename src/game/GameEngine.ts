@@ -1,5 +1,6 @@
 import {
   BUFFER_ROWS,
+  COLS,
   gravityForLevel,
   LINES_PER_LEVEL,
   LOCK_DELAY,
@@ -19,17 +20,21 @@ export interface ActivePiece {
   col: number;
 }
 
+// tetr.io의 All-Mini+ 판정 방식: T피스는 3코너 룰로 full/mini 스핀 모두 가능하지만,
+// T 이외의 모든 피스는 immobile(회전 후 위로 못 움직임)일 때만 mini 스핀이 인정된다.
+// 그래서 "spin"/"spin-single"/"spin-double"/"spin-triple"(정식 스핀)은 사실상 T피스 전용이고,
+// "spin-mini"/"spin-mini-single"은 어떤 피스로도 나올 수 있다 (실제 피스 종류는 spinPiece에 기록).
 export type ClearType =
   | "single"
   | "double"
   | "triple"
   | "tetris"
-  | "tspin"
-  | "tspin-mini"
-  | "tspin-single"
-  | "tspin-mini-single"
-  | "tspin-double"
-  | "tspin-triple";
+  | "spin"
+  | "spin-mini"
+  | "spin-single"
+  | "spin-mini-single"
+  | "spin-double"
+  | "spin-triple";
 
 export interface ClearEvent {
   type: ClearType;
@@ -38,6 +43,35 @@ export interface ClearEvent {
   combo: number;
   score: number;
   id: number;
+  attack: number;
+  spinPiece: PieceType | null;
+}
+
+interface GarbageChunk {
+  lines: number;
+  holeCol: number;
+}
+
+// PvP 가비지(공격) 물량표 - Jstris/Tetris Friends 계열 (검색으로 확인, 콤보 보너스는 아직 미포함)
+// btbBonusApplies는 applyScoring에서 이미 계산한 "이번 클리어가 B2B 1.5배 점수 보너스를
+// 받는지" 여부를 그대로 재사용 (같은 조건이므로 로직 중복 없이 그대로 씀)
+function getAttackLines(clearedCount: number, spin: "full" | "mini" | null, btbBonusApplies: boolean): number {
+  let attack = 0;
+  if (spin === "full") {
+    if (clearedCount === 2) attack = 4;
+    else if (clearedCount === 3) attack = 6;
+    // T-Spin(0줄) / T-Spin Single(1줄)은 검색으로 확인한 표 기준 0
+  } else if (spin === "mini") {
+    attack = 0;
+  } else {
+    if (clearedCount === 2) attack = 1;
+    else if (clearedCount === 3) attack = 2;
+    else if (clearedCount >= 4) attack = 4;
+  }
+  if (clearedCount > 0 && btbBonusApplies) {
+    attack += 1;
+  }
+  return attack;
 }
 
 const NEXT_PREVIEW = 5;
@@ -46,7 +80,7 @@ const SPAWN_COL = 3;
 
 export class GameEngine {
   board = new Board();
-  bag = new SevenBag();
+  bag: SevenBag;
   active: ActivePiece | null = null;
   holdType: PieceType | null = null;
   canHold = true;
@@ -89,15 +123,23 @@ export class GameEngine {
   lastClear: ClearEvent | null = null;
   private clearIdCounter = 0;
 
-  onGameOver: (() => void) | null = null;
+  // PvP: 상대에게서 받은 공격이 쌓이는 큐. 락 시점에 내 공격으로 먼저 상쇄되고,
+  // 이번 락에서 줄을 못 지웠을 때만 남은 만큼 실제로 보드에 삽입됨.
+  garbageQueue: GarbageChunk[] = [];
 
-  constructor() {
+  onGameOver: (() => void) | null = null;
+  onAttackSent: ((lines: number) => void) | null = null;
+  onBoardChanged: (() => void) | null = null;
+
+  constructor(seed?: number) {
+    this.bag = new SevenBag(seed);
     this.spawnNext();
   }
 
-  reset() {
+  reset(seed?: number) {
     this.board.reset();
-    this.bag = new SevenBag();
+    this.bag = new SevenBag(seed);
+    this.garbageQueue = [];
     this.holdType = null;
     this.canHold = true;
     this.score = 0;
@@ -286,45 +328,105 @@ export class GameEngine {
     this.canHold = false;
   }
 
-  private detectTSpin(): "full" | "mini" | null {
-    if (!this.active || this.active.type !== "T" || !this.lastActionWasRotate) return null;
-    const { row, col } = this.active;
-    const centerR = row + 1;
-    const centerC = col + 1;
-    const corners = [
-      [centerR - 1, centerC - 1],
-      [centerR - 1, centerC + 1],
-      [centerR + 1, centerC - 1],
-      [centerR + 1, centerC + 1],
-    ];
-    const filled = corners.map(([r, c]) => !this.board.isCellFree(r, c));
-    const filledCount = filled.filter(Boolean).length;
-    if (filledCount < 3) return null;
+  // tetr.io All-Mini+ 판정 방식.
+  // - T피스: 기존 3코너 룰로 full 또는 mini 판정. 3코너 조건을 못 채우면 immobile 여부로 mini 폴백.
+  // - T 이외 모든 피스: immobile(회전 후 위로 못 움직임 = "overhang")일 때만 mini 인정, full은 불가능.
+  private detectSpin(): "full" | "mini" | null {
+    if (!this.active || !this.lastActionWasRotate) return null;
 
-    // 전방 코너(회전 방향 기준 위쪽 두 코너 중 회전상태에 따른 "앞쪽")가 둘 다 채워져 있으면 정식 T-spin
-    const frontPairsByRotation: Record<number, [number, number]> = {
-      0: [0, 1], // spawn: 위쪽 두 코너가 앞
-      1: [1, 3], // R: 오른쪽 두 코너
-      2: [2, 3], // 2: 아래쪽 두 코너
-      3: [0, 2], // L: 왼쪽 두 코너
-    };
-    const [a, b] = frontPairsByRotation[this.active.rotation];
-    const frontFilled = filled[a] && filled[b];
-    if (frontFilled) return "full";
-    // 5번째 킥(인덱스 4)으로 회전했다면 mini여도 full 취급 (가이드라인 규칙)
-    if (this.lastKickIndex === 4) return "full";
-    return "mini";
+    if (this.active.type === "T") {
+      const { row, col } = this.active;
+      const centerR = row + 1;
+      const centerC = col + 1;
+      const corners = [
+        [centerR - 1, centerC - 1],
+        [centerR - 1, centerC + 1],
+        [centerR + 1, centerC - 1],
+        [centerR + 1, centerC + 1],
+      ];
+      const filled = corners.map(([r, c]) => !this.board.isCellFree(r, c));
+      const filledCount = filled.filter(Boolean).length;
+
+      if (filledCount >= 3) {
+        // 전방 코너(회전 방향 기준 "앞쪽" 두 코너)가 둘 다 채워져 있으면 정식 스핀
+        const frontPairsByRotation: Record<number, [number, number]> = {
+          0: [0, 1], // spawn: 위쪽 두 코너가 앞
+          1: [1, 3], // R: 오른쪽 두 코너
+          2: [2, 3], // 2: 아래쪽 두 코너
+          3: [0, 2], // L: 왼쪽 두 코너
+        };
+        const [a, b] = frontPairsByRotation[this.active.rotation];
+        const frontFilled = filled[a] && filled[b];
+        if (frontFilled) return "full";
+        // 5번째 킥(인덱스 4)으로 회전했다면 mini여도 full 취급 (가이드라인 규칙)
+        if (this.lastKickIndex === 4) return "full";
+        return "mini";
+      }
+      return this.isImmobile() ? "mini" : null;
+    }
+
+    return this.isImmobile() ? "mini" : null;
+  }
+
+  // All-Mini+의 immobile(overhang) 판정: 회전 후 위로 움직일 수 없으면 스핀으로 인정.
+  // 착지 상태에서는 아래로 못 움직이는 게 당연하고, 좌우는 라인 클리어 가능성에 영향 없다는
+  // tetr.io의 실전 단순화를 그대로 따름 (위쪽만 확인).
+  private isImmobile(): boolean {
+    if (!this.active) return false;
+    return !this.canPlace({ ...this.active, row: this.active.row - 1 });
+  }
+
+  // PvP: 상대에게서 온 공격을 큐에 쌓음 (구멍 컬럼은 도착 시점에 한 번 정해짐 - "Change on Attack")
+  queueGarbage(lines: number) {
+    if (lines <= 0) return;
+    const holeCol = Math.floor(Math.random() * COLS);
+    this.garbageQueue.push({ lines, holeCol });
+  }
+
+  private isBoardEmpty(): boolean {
+    return this.board.grid.every((row) => row.every((cell) => cell === null));
+  }
+
+  // 이번 락에서 보낼 공격으로 쌓여있던 상대 공격(가비지)을 먼저 상쇄하고,
+  // 이번 락에서 줄을 못 지웠을 때만 남은 가비지를 실제로 보드에 삽입한다.
+  private resolveGarbage(clearedCount: number, outgoingAttack: number) {
+    let remaining = outgoingAttack;
+    while (remaining > 0 && this.garbageQueue.length > 0) {
+      const chunk = this.garbageQueue[0];
+      if (chunk.lines <= remaining) {
+        remaining -= chunk.lines;
+        this.garbageQueue.shift();
+      } else {
+        chunk.lines -= remaining;
+        remaining = 0;
+      }
+    }
+    if (remaining > 0) {
+      this.onAttackSent?.(remaining);
+    }
+    if (clearedCount === 0 && this.garbageQueue.length > 0) {
+      for (const chunk of this.garbageQueue) {
+        this.board.addGarbage(chunk.lines, chunk.holeCol);
+      }
+      this.garbageQueue = [];
+    }
   }
 
   private lockPiece() {
     if (!this.active) return;
-    const tspin = this.detectTSpin();
+    const spin = this.detectSpin();
+    const spinPiece = spin ? this.active.type : null;
     const cells = this.getCells(this.active);
     this.board.lockCells(cells, this.active.type);
     const clearedRows = this.board.clearLines();
     const clearedCount = clearedRows.length;
 
-    this.applyScoring(clearedCount, tspin);
+    let attack = this.applyScoring(clearedCount, spin, spinPiece);
+    if (clearedCount > 0 && this.isBoardEmpty()) {
+      attack += 10; // 퍼펙트 클리어(올클리어) 보너스
+    }
+    this.resolveGarbage(clearedCount, attack);
+    this.onBoardChanged?.();
 
     this.active = null;
     if (!this.gameOver) {
@@ -332,18 +434,18 @@ export class GameEngine {
     }
   }
 
-  private applyScoring(clearedCount: number, tspin: "full" | "mini" | null) {
+  private applyScoring(clearedCount: number, spin: "full" | "mini" | null, spinPiece: PieceType | null): number {
     let type: ClearType | null = null;
     let base = 0;
 
-    if (tspin === "full") {
-      if (clearedCount === 0) { type = "tspin"; base = 400; }
-      else if (clearedCount === 1) { type = "tspin-single"; base = 800; }
-      else if (clearedCount === 2) { type = "tspin-double"; base = 1200; }
-      else if (clearedCount === 3) { type = "tspin-triple"; base = 1600; }
-    } else if (tspin === "mini") {
-      if (clearedCount === 0) { type = "tspin-mini"; base = 100; }
-      else { type = "tspin-mini-single"; base = 200; }
+    if (spin === "full") {
+      if (clearedCount === 0) { type = "spin"; base = 400; }
+      else if (clearedCount === 1) { type = "spin-single"; base = 800; }
+      else if (clearedCount === 2) { type = "spin-double"; base = 1200; }
+      else if (clearedCount === 3) { type = "spin-triple"; base = 1600; }
+    } else if (spin === "mini") {
+      if (clearedCount === 0) { type = "spin-mini"; base = 100; }
+      else { type = "spin-mini-single"; base = 200; }
     } else if (clearedCount > 0) {
       if (clearedCount === 1) { type = "single"; base = 100; }
       else if (clearedCount === 2) { type = "double"; base = 300; }
@@ -357,14 +459,19 @@ export class GameEngine {
       this.combo = -1;
     }
 
+    let attack = 0;
+
     if (type) {
-      const isHardType = type === "tetris" || tspin !== null;
-      const btbBonus = this.backToBack && isHardType && clearedCount > 0 ? 1.5 : 1;
+      const isHardType = type === "tetris" || spin !== null;
+      const btbBonusApplies = this.backToBack && isHardType && clearedCount > 0;
+      const btbBonus = btbBonusApplies ? 1.5 : 1;
       let gained = Math.floor(base * this.level * btbBonus);
       if (this.combo > 0) {
         gained += 50 * this.combo * this.level;
       }
       this.score += gained;
+
+      attack = getAttackLines(clearedCount, spin, btbBonusApplies);
 
       if (clearedCount > 0) {
         if (isHardType) this.backToBack = true;
@@ -378,9 +485,9 @@ export class GameEngine {
         combo: this.combo,
         score: gained,
         id: this.clearIdCounter++,
+        attack,
+        spinPiece,
       };
-    } else if (tspin && clearedCount === 0) {
-      // T-spin without line clear already handled above
     }
 
     if (clearedCount > 0) {
@@ -388,6 +495,8 @@ export class GameEngine {
       const newLevel = Math.floor(this.lines / LINES_PER_LEVEL) + 1;
       if (newLevel !== this.level) this.level = newLevel;
     }
+
+    return attack;
   }
 
   setInput(dir: "left" | "right" | null) {

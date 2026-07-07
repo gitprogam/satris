@@ -1,7 +1,7 @@
 import { COLS, TOTAL_ROWS } from "./constants";
 import type { PieceType } from "./constants";
 
-export type Cell = PieceType | null;
+export type Cell = PieceType | "GARBAGE" | null;
 
 export class Board {
   grid: Cell[][];
@@ -48,6 +48,15 @@ export class Board {
     const newRows = Array.from({ length: fullRows.length }, () => Array<Cell>(COLS).fill(null));
     this.grid = [...newRows, ...remaining];
     return fullRows;
+  }
+
+  // 맨 아래에 가비지 줄을 삽입 (holeCol만 비어있고 나머지는 꽉 찬 줄), 기존 줄은 위로 밀림
+  addGarbage(lines: number, holeCol: number) {
+    if (lines <= 0) return;
+    const garbageRows: Cell[][] = Array.from({ length: lines }, () =>
+      Array.from({ length: COLS }, (_, c) => (c === holeCol ? null : "GARBAGE"))
+    );
+    this.grid = [...this.grid.slice(lines), ...garbageRows];
   }
 
   reset() {

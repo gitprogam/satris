@@ -10,31 +10,34 @@ import {
 import type { PieceType } from "../game/constants";
 import { GameEngine, type ClearType } from "../game/GameEngine";
 import { PIECE_SHAPES } from "../game/pieces";
+import { colorForCell, drawCell } from "./cellDraw";
 
 const BOARD_W = COLS * CELL_SIZE;
 const BOARD_H = VISIBLE_ROWS * CELL_SIZE;
 const SIDE_PANEL_W = 170;
 const MARGIN = 24;
 
-const CLEAR_LABELS: Record<ClearType, string> = {
+const PLAIN_CLEAR_LABELS: Partial<Record<ClearType, string>> = {
   single: "SINGLE",
   double: "DOUBLE",
   triple: "TRIPLE",
   tetris: "TETRIS",
-  tspin: "T-SPIN",
-  "tspin-mini": "T-SPIN MINI",
-  "tspin-single": "T-SPIN SINGLE",
-  "tspin-mini-single": "T-SPIN MINI SINGLE",
-  "tspin-double": "T-SPIN DOUBLE",
-  "tspin-triple": "T-SPIN TRIPLE",
 };
 
-function drawCell(g: Graphics, x: number, y: number, size: number, color: number, alpha = 1) {
-  const pad = 1.5;
-  g.roundRect(x + pad, y + pad, size - pad * 2, size - pad * 2, 4);
-  g.fill({ color, alpha });
-  g.roundRect(x + pad * 2, y + pad * 2, size - pad * 4, size * 0.32, 3);
-  g.fill({ color: 0xffffff, alpha: alpha * 0.18 });
+const SPIN_LABEL_SUFFIX: Partial<Record<ClearType, string>> = {
+  spin: "SPIN",
+  "spin-mini": "SPIN MINI",
+  "spin-single": "SPIN SINGLE",
+  "spin-mini-single": "SPIN MINI SINGLE",
+  "spin-double": "SPIN DOUBLE",
+  "spin-triple": "SPIN TRIPLE",
+};
+
+// tetr.io처럼 스핀을 일으킨 실제 피스 종류를 붙여서 "T-SPIN", "S-SPIN MINI"처럼 표시
+function clearLabel(type: ClearType, spinPiece: PieceType | null): string {
+  const suffix = SPIN_LABEL_SUFFIX[type];
+  if (suffix) return `${spinPiece ?? "?"}-${suffix}`;
+  return PLAIN_CLEAR_LABELS[type] ?? type.toUpperCase();
 }
 
 export class GameRenderer {
@@ -42,6 +45,7 @@ export class GameRenderer {
   private boardLayer = new Container();
   private boardBg = new Graphics();
   private boardGfx = new Graphics();
+  private garbageMeterGfx = new Graphics();
   private holdGfx = new Graphics();
   private nextGfx = new Graphics();
   private holdBox = new Graphics();
@@ -88,6 +92,11 @@ export class GameRenderer {
     this.boardBg.rect(0, 0, BOARD_W, BOARD_H).stroke({ color: 0x4a4a6a, width: 2 });
     this.boardLayer.addChild(this.boardBg);
     this.boardLayer.addChild(this.boardGfx);
+
+    // PvP 가비지 미터 (보드 왼쪽에 붙는 얇은 주황 바 - 대기 중인 가비지 줄 수만큼 채워짐)
+    this.garbageMeterGfx.x = -12;
+    this.garbageMeterGfx.y = 0;
+    this.boardLayer.addChild(this.garbageMeterGfx);
 
     // Hold 패널 (왼쪽)
     const holdContainer = new Container();
@@ -224,13 +233,21 @@ export class GameRenderer {
   }
 
   render(engine: GameEngine, deltaMS: number) {
+    // PvP 가비지 미터
+    this.garbageMeterGfx.clear();
+    const pendingGarbage = engine.garbageQueue.reduce((sum, chunk) => sum + chunk.lines, 0);
+    if (pendingGarbage > 0) {
+      const meterH = Math.min(pendingGarbage, VISIBLE_ROWS) * CELL_SIZE;
+      this.garbageMeterGfx.rect(0, BOARD_H - meterH, 8, meterH).fill({ color: 0xff6b35 });
+    }
+
     // 보드 고정된 셀
     this.boardGfx.clear();
     for (let row = BUFFER_ROWS; row < BUFFER_ROWS + VISIBLE_ROWS; row++) {
       for (let col = 0; col < COLS; col++) {
         const cell = engine.board.grid[row][col];
         if (cell) {
-          drawCell(this.boardGfx, col * CELL_SIZE, (row - BUFFER_ROWS) * CELL_SIZE, CELL_SIZE, PIECE_COLORS[cell]);
+          drawCell(this.boardGfx, col * CELL_SIZE, (row - BUFFER_ROWS) * CELL_SIZE, CELL_SIZE, colorForCell(cell));
         }
       }
     }
@@ -285,7 +302,7 @@ export class GameRenderer {
     // 클리어 메시지 애니메이션
     if (engine.lastClear && engine.lastClear.id !== this.lastClearId) {
       this.lastClearId = engine.lastClear.id;
-      const label = CLEAR_LABELS[engine.lastClear.type];
+      const label = clearLabel(engine.lastClear.type, engine.lastClear.spinPiece);
       this.clearMsgText.text = engine.lastClear.backToBack ? `B2B ${label}` : label;
       this.clearMsgText.alpha = 1;
       this.clearMsgTimer = 1100;

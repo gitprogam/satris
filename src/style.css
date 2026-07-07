@@ -93,3 +93,108 @@ canvas {
 .settings-actions button:hover {
   background: #34344e;
 }
+
+.overlay-screen {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 340px;
+  background: #15151f;
+  border: 2px solid #33334a;
+  border-radius: 10px;
+  padding: 28px;
+  color: #d0d0e8;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  z-index: 20;
+  text-align: center;
+}
+
+.overlay-screen.hidden {
+  display: none;
+}
+
+.overlay-screen h1 {
+  margin: 0 0 24px;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.overlay-screen h2 {
+  margin: 0 0 20px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.overlay-screen label {
+  display: block;
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.overlay-screen input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  background: #0a0a12;
+  border: 1px solid #33334a;
+  border-radius: 6px;
+  color: #f0f0ff;
+  font-size: 14px;
+  text-align: center;
+}
+
+.overlay-screen button {
+  padding: 10px 16px;
+  background: #2a2a40;
+  border: 1px solid #3a3a56;
+  border-radius: 6px;
+  color: #e0e0f0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.overlay-screen button:hover {
+  background: #34344e;
+}
+
+.menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lobby-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.lobby-section input {
+  flex: 1;
+  text-align: left;
+}
+
+#pvp-room-code {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: #ffe066;
+  margin: 0;
+}
+
+.pvp-status {
+  min-height: 20px;
+  font-size: 13px;
+  color: #9090b0;
+}
+
+.pvp-back {
+  width: 100%;
+  margin-top: 6px;
+}
