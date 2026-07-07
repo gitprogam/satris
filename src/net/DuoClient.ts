@@ -32,6 +32,10 @@ export interface DuoStateMessage {
 // 보드/공격을 보내는 게 아니라 **입력만 보내고, 서버가 매 틱 계산한 상태를 받기만** 한다.
 export class DuoClient {
   private ws: WebSocket | null = null;
+  // 연결이 아직 OPEN 상태가 되기 전에 방 생성/참가 버튼을 눌러버리면(특히 터널처럼
+  // 핸드셰이크에 시간이 걸리는 환경) 메시지가 조용히 씹혀서 아무 반응 없이 멈춰버렸다.
+  // OPEN 전에는 큐에 쌓아뒀다가 연결되는 즉시 순서대로 흘려보낸다.
+  private sendQueue: unknown[] = [];
 
   onCreated: ((code: string) => void) | null = null;
   onJoinError: ((reason: DuoJoinErrorReason) => void) | null = null;
@@ -47,7 +51,13 @@ export class DuoClient {
       const ws = new WebSocket(url);
       this.ws = ws;
 
-      ws.onopen = () => resolve();
+      ws.onopen = () => {
+        for (const message of this.sendQueue) {
+          ws.send(JSON.stringify(message));
+        }
+        this.sendQueue = [];
+        resolve();
+      };
       ws.onerror = () => {
         this.onConnectError?.();
         reject(new Error("듀오 서버에 연결할 수 없습니다."));
@@ -92,6 +102,8 @@ export class DuoClient {
   private send(message: unknown) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
+    } else if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      this.sendQueue.push(message);
     }
   }
 
