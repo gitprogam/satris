@@ -5,6 +5,8 @@ import {
   LINES_PER_LEVEL,
   LOCK_DELAY,
   MAX_LOCK_RESETS,
+  TOTAL_ROWS,
+  VISIBLE_ROWS,
 } from "./constants";
 import type { PieceType } from "./constants";
 import { Board } from "./Board";
@@ -172,17 +174,26 @@ export class GameEngine {
     return cells.every(([r, c]) => this.board.isCellFree(r, c));
   }
 
-  // tetr.io의 스폰 위험 경고(X 표시)용. 다음 피스가 기본 스폰 위치에 온전히 놓일 수 없는
-  // 상태(= 지금 스폰하면 Block Out)일 때, 그 스폰 모양 전체(막힌 칸/빈 칸 구분 없이)를
-  // 반환한다 - 막힌 칸이 있다는 건 줄을 지워서 자연스럽게 자리를 못 만들면(Clutch Clear
-  // 실패) 다음 피스가 여기서 죽는다는 뜻이라, 모양 전체가 위험 표시 대상이다.
+  // tetr.io의 스폰 위험 경고(X 표시)용. 실제로 스폰이 막혔는지 여부가 아니라, 일반
+  // 테트리스 모드 관례대로 "스택 높이가 18줄(VISIBLE_ROWS-2) 이상"이면 다음 피스의
+  // 스폰 모양 전체(막힌 칸/빈 칸 구분 없이)를 위험 표시 대상으로 반환한다.
   getSpawnDangerCells(): [number, number][] {
     const [nextType] = this.bag.peek(1);
     if (!nextType) return [];
+
+    let topmostFilledRow = -1;
+    for (let row = 0; row < TOTAL_ROWS; row++) {
+      if (this.board.grid[row].some((cell) => cell !== null)) {
+        topmostFilledRow = row;
+        break;
+      }
+    }
+    if (topmostFilledRow === -1) return [];
+    const stackHeight = TOTAL_ROWS - topmostFilledRow;
+    if (stackHeight < VISIBLE_ROWS - 2) return [];
+
     const shape = PIECE_SHAPES[nextType][0];
-    const cells = shape.map(([r, c]) => [r + SPAWN_ROW, c + SPAWN_COL] as [number, number]);
-    const wouldBlockOut = cells.some(([r, c]) => !this.board.isCellFree(r, c));
-    return wouldBlockOut ? cells : [];
+    return shape.map(([r, c]) => [r + SPAWN_ROW, c + SPAWN_COL] as [number, number]);
   }
 
   // Block Out: 스폰 위치(SPAWN_ROW/SPAWN_COL)가 막혀 있으면 게임오버.
@@ -450,11 +461,6 @@ export class GameEngine {
     const spinPiece = spin ? this.active.type : null;
     const cells = this.getCells(this.active);
     this.board.lockCells(cells, this.active.type);
-
-    // Lock Out: 방금 락된 피스가 전부 버퍼(화면 밖 vanish zone) 안에서 락되면 게임오버
-    if (cells.every(([row]) => row < BUFFER_ROWS)) {
-      this.triggerGameOver();
-    }
 
     const clearedRows = this.board.clearLines();
     const clearedCount = clearedRows.length;
