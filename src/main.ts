@@ -55,6 +55,7 @@ function setupSettingsPanel(getEngine: () => GameEngine | null, input: InputHand
   }
 
   populateInputs(loadSettings());
+  getEngine()?.applySettings(loadSettings());
 
   [dasInput, arrInput, sdfInput, dcdInput].forEach((el) => {
     el.addEventListener("input", readAndApply);
