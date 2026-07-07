@@ -5,11 +5,13 @@ import { GameEngine } from "./GameEngine";
 // tetr.io 커뮤니티의 "4-Wide 연습" 트레이너(Four-tris, DDRKirby 4-Wide Trainer 등) 컨셉을
 // 재현: 보드 양옆에 가비지 벽을 쌓아 가운데 4칸 우물만 남기고, 그 우물에서만 계속
 // 줄을 지워 콤보를 이어가야 한다. 벽은 줄어들 때마다 자동으로 다시 채워져서 무한히
-// 반복 연습할 수 있다. 기본값은 콤보가 끊겨도 게임이 끝나지 않고 콤보 카운터만
-// 리셋된 채 계속 진행(사용자 피드백 반영) - 진짜 블록아웃 때만 끝남.
-// hardcore=true면 원래(구) 버전대로 콤보가 끊기는 순간 즉시 게임오버 - 이 버전을
-// 그리워하는 사람이 많아서 이스터에그로 남겨둠(main.ts에서 4-Wide 메뉴 버튼을
-// Shift+클릭하면 진입).
+// 반복 연습할 수 있다.
+//
+// 일반 모드(기본, 그냥 클릭): 우물이 완전히 빈 채로 시작하고, 콤보가 끊겨도 게임이
+// 끝나지 않고 콤보 카운터만 리셋된 채 계속 진행 - 진짜 블록아웃 때만 끝남.
+// 이스터에그(hardcore=true, 4-Wide 메뉴 버튼 Shift+클릭): 원래(구) 버전 그대로 -
+// 시작할 때 우물에 T-스핀용 3블록 잔여물이 깔려있고, 콤보가 끊기는 순간 즉시
+// 게임오버. 두 모드는 서로 섞이지 않고 완전히 분리되어 있다.
 export const WELL_WIDTH = 4;
 export const WELL_START = Math.floor((COLS - WELL_WIDTH) / 2);
 export const WELL_END = WELL_START + WELL_WIDTH - 1;
@@ -27,7 +29,7 @@ export class FourWidePractice {
     this.hardcore = hardcore;
     this.board = new Board(COLS);
     this.buildWalls();
-    this.buildStartingResidue();
+    if (this.hardcore) this.buildStartingResidue();
     this.engine = new GameEngine(seed, { board: this.board, colBounds: [WELL_START, WELL_END] });
     this.engine.onBoardChanged = () => this.afterLock();
   }
@@ -57,7 +59,7 @@ export class FourWidePractice {
     this.bestCombo = 0;
     this.prevCombo = -1;
     this.buildWalls();
-    this.buildStartingResidue();
+    if (this.hardcore) this.buildStartingResidue();
   }
 
   private wallHeight(): number {
