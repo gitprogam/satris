@@ -260,6 +260,17 @@ export class GameRenderer {
     }
   }
 
+  // 보드 좌표(row)가 보이는 영역이면 boardGfx에, 버퍼 미리보기 영역 안이면 vanishGfx에 그림.
+  // 그 위(미리보기 범위 밖)면 아무 것도 안 그림 - 고스트/현재 피스가 버퍼에서 화면으로
+  // 넘어올 때 갑자기 나타나 보이지 않고, 보여주는 버퍼 구간에서부터 자연스럽게 보이게 함.
+  private drawAtRow(row: number, col: number, color: number, alpha = 1) {
+    if (row >= BUFFER_ROWS) {
+      drawCell(this.boardGfx, col * CELL_SIZE, (row - BUFFER_ROWS) * CELL_SIZE, CELL_SIZE, color, alpha);
+    } else if (row >= BUFFER_ROWS - VANISH_ROWS) {
+      drawCell(this.vanishGfx, col * CELL_SIZE, (row - (BUFFER_ROWS - VANISH_ROWS)) * CELL_SIZE, CELL_SIZE, color, alpha);
+    }
+  }
+
   render(engine: GameEngine, deltaMS: number) {
     // 스폰 위험 경고 영역 (버퍼 미리보기 + 다음 피스가 겹칠 칸에 X 표시)
     this.vanishGfx.clear();
@@ -273,13 +284,6 @@ export class GameRenderer {
         }
       }
     }
-    for (const [row, col] of engine.getSpawnDangerCells()) {
-      const vr = row - (BUFFER_ROWS - VANISH_ROWS);
-      if (vr >= 0 && vr < VANISH_ROWS) {
-        drawDangerX(this.vanishGfx, col * CELL_SIZE, vr * CELL_SIZE, CELL_SIZE);
-      }
-    }
-
     // PvP 가비지 미터
     this.garbageMeterGfx.clear();
     const pendingGarbage = engine.garbageQueue.reduce((sum, chunk) => sum + chunk.lines, 0);
@@ -304,15 +308,21 @@ export class GameRenderer {
       const ghostCells = engine.getGhostCells();
       const color = PIECE_COLORS[engine.active.type];
       for (const [r, c] of ghostCells) {
-        const vr = r - BUFFER_ROWS;
-        if (vr >= 0) drawCell(this.boardGfx, c * CELL_SIZE, vr * CELL_SIZE, CELL_SIZE, color, GHOST_ALPHA);
+        this.drawAtRow(r, c, color, GHOST_ALPHA);
       }
 
       // 현재 피스
       const activeCells = engine.getActiveCells();
       for (const [r, c] of activeCells) {
-        const vr = r - BUFFER_ROWS;
-        if (vr >= 0) drawCell(this.boardGfx, c * CELL_SIZE, vr * CELL_SIZE, CELL_SIZE, color);
+        this.drawAtRow(r, c, color);
+      }
+    }
+
+    // 스폰 위험 X 표시 - 고스트/현재 피스보다 나중에 그려서 겹쳐도 항상 보이게 함
+    for (const [row, col] of engine.getSpawnDangerCells()) {
+      const vr = row - (BUFFER_ROWS - VANISH_ROWS);
+      if (vr >= 0 && vr < VANISH_ROWS) {
+        drawDangerX(this.vanishGfx, col * CELL_SIZE, vr * CELL_SIZE, CELL_SIZE);
       }
     }
 
