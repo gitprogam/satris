@@ -1,7 +1,8 @@
 import type { Application } from "pixi.js";
+import type { Cell } from "../game/Board";
 import type { GameControls } from "../game/InputHandler";
 import { loadSettings } from "../game/Settings";
-import { DuoClient, type DuoJoinErrorReason, type DuoStateMessage, type DuoTeam } from "../net/DuoClient";
+import { DuoClient, type DuoJoinErrorReason, type DuoPlayerState, type DuoStateMessage, type DuoTeam } from "../net/DuoClient";
 import { DuoRenderer } from "../render/DuoRenderer";
 
 export type DuoResult = "win" | "lose";
@@ -50,7 +51,10 @@ export class DuoSession {
 
   team: DuoTeam | null = null;
   slot: 0 | 1 | null = null;
-  private latestState: DuoStateMessage | null = null;
+  // 그리드(무거움, 락 때만 옴)와 플레이어 상태(가벼움, 매 틱 옴)가 서버에서 별도
+  // 메시지로 오기 때문에 여기서 최신값을 각각 들고 있다가 합쳐서 렌더러에 넘긴다.
+  private latestGrid: Cell[][] | null = null;
+  private latestPlayers: [DuoPlayerState, DuoPlayerState] | null = null;
 
   onRoomCreated: ((code: string) => void) | null = null;
   onJoinError: ((reason: DuoJoinErrorReason) => void) | null = null;
@@ -64,8 +68,8 @@ export class DuoSession {
     this.renderer = new DuoRenderer(app);
 
     this.controls = new DuoControlsAdapter(this.client, () => {
-      if (!this.latestState || this.slot === null) return false;
-      return this.latestState.players[this.slot].gameOver;
+      if (!this.latestPlayers || this.slot === null) return false;
+      return this.latestPlayers[this.slot].gameOver;
     });
 
     this.client.onCreated = (code) => this.onRoomCreated?.(code);
@@ -79,8 +83,11 @@ export class DuoSession {
       this.client.sendSettings(loadSettings());
       this.onMatchStart?.();
     };
-    this.client.onState = (state) => {
-      this.latestState = state;
+    this.client.onLive = (msg) => {
+      this.latestPlayers = msg.players;
+    };
+    this.client.onBoard = (msg) => {
+      this.latestGrid = msg.grid;
     };
     this.client.onEnemyBoard = (grid) => {
       this.renderer.enemyView.setGrid(grid);
@@ -107,8 +114,9 @@ export class DuoSession {
   }
 
   render() {
-    if (this.latestState && this.slot !== null) {
-      this.renderer.render(this.latestState, this.slot);
+    if (this.latestGrid && this.latestPlayers && this.slot !== null && this.team !== null) {
+      const state: DuoStateMessage = { team: this.team, grid: this.latestGrid, players: this.latestPlayers };
+      this.renderer.render(state, this.slot);
     }
   }
 

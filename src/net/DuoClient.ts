@@ -22,6 +22,20 @@ export interface DuoPlayerState {
   garbageQueueLines: number;
 }
 
+// 보드(그리드)는 무겁고 락이 일어날 때만 바뀌므로 별도 메시지로 분리되어 있다 - 매 틱은
+// 가벼운 "live"(피스 위치 등)만 오고, "board"(그리드)는 실제로 바뀔 때만 온다.
+export interface DuoLiveMessage {
+  team: DuoTeam;
+  players: [DuoPlayerState, DuoPlayerState];
+}
+
+export interface DuoBoardMessage {
+  team: DuoTeam;
+  grid: Cell[][];
+}
+
+// 네트워크로 오는 실제 메시지는 아니고, DuoSession이 최신 DuoLiveMessage/DuoBoardMessage를
+// 합쳐서 DuoRenderer에 넘기는 용도의 타입.
 export interface DuoStateMessage {
   team: DuoTeam;
   grid: Cell[][];
@@ -41,7 +55,8 @@ export class DuoClient {
   onJoinError: ((reason: DuoJoinErrorReason) => void) | null = null;
   onWaiting: ((filled: number, total: number) => void) | null = null;
   onMatchStart: ((team: DuoTeam, slot: 0 | 1) => void) | null = null;
-  onState: ((state: DuoStateMessage) => void) | null = null;
+  onLive: ((msg: DuoLiveMessage) => void) | null = null;
+  onBoard: ((msg: DuoBoardMessage) => void) | null = null;
   onEnemyBoard: ((grid: Cell[][]) => void) | null = null;
   onTeamOver: ((result: "win" | "lose") => void) | null = null;
   onConnectError: (() => void) | null = null;
@@ -87,8 +102,11 @@ export class DuoClient {
       case "duo:matchStart":
         this.onMatchStart?.(msg.team, msg.slot);
         break;
-      case "duo:state":
-        this.onState?.(msg as DuoStateMessage);
+      case "duo:live":
+        this.onLive?.(msg as DuoLiveMessage);
+        break;
+      case "duo:board":
+        this.onBoard?.(msg as DuoBoardMessage);
         break;
       case "duo:enemyBoard":
         this.onEnemyBoard?.(msg.grid);

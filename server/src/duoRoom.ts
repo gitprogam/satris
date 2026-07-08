@@ -11,7 +11,6 @@ import type { EngineSettings } from "../../src/game/Settings";
 // 직접 시뮬레이션하는 "서버 권위형"이다 - 클라이언트는 입력만 보내고 상태를 그대로 그린다.
 
 const TICK_MS = 16;
-const ENEMY_BOARD_EVERY_N_TICKS = 5;
 
 type TeamIndex = 0 | 1; // 0 = A팀, 1 = B팀
 type SlotIndex = 0 | 1;
@@ -24,7 +23,6 @@ interface DuoRoom {
   boards?: [Board, Board];
   engines?: [[GameEngine, GameEngine], [GameEngine, GameEngine]];
   tickTimer?: ReturnType<typeof setInterval>;
-  enemyTickCounter: number;
 }
 
 interface SocketInfo {
@@ -102,6 +100,23 @@ function checkTeamOver(room: DuoRoom, team: TeamIndex) {
   }
 }
 
+// 보드(그리드)는 무겁고(20x40칸) 락이 일어날 때만 실제로 바뀌므로, 매 틱 통째로
+// 보내지 않고 GameEngine.onBoardChanged 훅에서 바뀔 때만 보낸다. 매 틱 보내는 건
+// 활성 피스 위치 등 가벼운 "live" 정보뿐 - 이게 렉의 주 원인이었음.
+function broadcastBoard(room: DuoRoom, team: TeamIndex) {
+  if (!room.boards) return;
+  const board = room.boards[team];
+  const ownMsg = { type: "duo:board", team: teamLabel(team), grid: board.grid };
+  for (const s of teamSockets(room, team)) {
+    if (s) send(s, ownMsg);
+  }
+  const enemyTeam: TeamIndex = team === 0 ? 1 : 0;
+  const enemyMsg = { type: "duo:enemyBoard", grid: board.grid };
+  for (const s of teamSockets(room, enemyTeam)) {
+    if (s) send(s, enemyMsg);
+  }
+}
+
 function tick(room: DuoRoom) {
   if (!room.engines || !room.boards) return;
   for (const team of [0, 1] as TeamIndex[]) {
@@ -110,28 +125,15 @@ function tick(room: DuoRoom) {
     }
   }
 
-  room.enemyTickCounter++;
-  const sendEnemyBoard = room.enemyTickCounter % ENEMY_BOARD_EVERY_N_TICKS === 0;
-
   for (const team of [0, 1] as TeamIndex[]) {
-    const board = room.boards[team];
     const [e0, e1] = room.engines[team];
-    const state = {
-      type: "duo:state",
+    const live = {
+      type: "duo:live",
       team: teamLabel(team),
-      grid: board.grid,
       players: [playerState(e0), playerState(e1)],
     };
     for (const s of teamSockets(room, team)) {
-      if (s) send(s, state);
-    }
-
-    if (sendEnemyBoard) {
-      const enemyTeam: TeamIndex = team === 0 ? 1 : 0;
-      const msg = { type: "duo:enemyBoard", grid: board.grid };
-      for (const s of teamSockets(room, enemyTeam)) {
-        if (s) send(s, msg);
-      }
+      if (s) send(s, live);
     }
   }
 }
@@ -150,6 +152,7 @@ function startMatch(room: DuoRoom) {
     for (const engine of room.engines[team]) {
       engine.onAttackSent = (lines) => routeAttack(room, team, lines);
       engine.onGameOver = () => checkTeamOver(room, team);
+      engine.onBoardChanged = () => broadcastBoard(room, team);
     }
   }
 
@@ -161,12 +164,16 @@ function startMatch(room: DuoRoom) {
     send(s, { type: "duo:matchStart", team: teamLabel(team), slot });
   });
 
+  // 첫 락이 나기 전까지 클라이언트가 빈 보드조차 못 받는 일이 없도록 시작 상태를 한 번 보냄
+  broadcastBoard(room, 0);
+  broadcastBoard(room, 1);
+
   room.tickTimer = setInterval(() => tick(room), TICK_MS);
 }
 
 function handleCreate(ws: WebSocket) {
   const code = generateRoomCode((c) => rooms.has(c));
-  const room: DuoRoom = { code, sockets: [ws, null, null, null], started: false, enemyTickCounter: 0 };
+  const room: DuoRoom = { code, sockets: [ws, null, null, null], started: false };
   rooms.set(code, room);
   socketInfo.set(ws, { code, team: 0, slot: 0 });
   send(ws, { type: "duo:created", code });
