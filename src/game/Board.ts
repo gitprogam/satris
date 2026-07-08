@@ -67,6 +67,16 @@ export class Board {
     return overflow;
   }
 
+  // 4-Wide 연습(이스터에그 하드코어 모드)용: 맨 아래에 지정된 열(cols)만 "GARBAGE"로
+  // 채운 줄을 삽입하고 기존 줄은 위로 밀어올린다. addGarbage()와 달리 구멍이 하나가
+  // 아니라, 지정한 열 이외의 나머지 전부가 뚫려있는 형태(=4칸 우물을 그대로 남겨둔
+  // 채 양옆 벽만 다시 쌓기)라 별도 메서드로 분리했다.
+  addPartialGarbage(cols: number[]) {
+    const colSet = new Set(cols);
+    const row: Cell[] = Array.from({ length: this.width }, (_, c) => (colSet.has(c) ? "GARBAGE" : null));
+    this.grid = [...this.grid.slice(1), row];
+  }
+
   reset() {
     this.grid = this.emptyGrid();
   }
