@@ -6,9 +6,15 @@ import type { EngineSettings } from "../game/Settings";
 export type DuoJoinErrorReason = "not_found" | "full";
 export type DuoTeam = "A" | "B";
 
-export interface DuoPlayerState {
+// 활성 피스 위치는 매 틱 바뀌므로 자주(그래도 60Hz보다 낮은 빈도로 스로틀됨) 온다.
+export interface DuoLivePlayerState {
   active: ActivePiece | null;
   ghostRow: number | null;
+}
+
+// 나머지는 사실상 락이 일어날 때만 바뀌므로 duo:board와 같이 묶여서 온다 - 매 틱 보낼
+// 필요가 없었음(렉의 주 원인 중 하나).
+export interface DuoStatsPlayerState {
   hold: PieceType | null;
   canHold: boolean;
   next: PieceType[];
@@ -22,16 +28,20 @@ export interface DuoPlayerState {
   garbageQueueLines: number;
 }
 
+// 렌더러/세션에서 쓰는 합본 타입 (live + stats).
+export interface DuoPlayerState extends DuoLivePlayerState, DuoStatsPlayerState {}
+
 // 보드(그리드)는 무겁고 락이 일어날 때만 바뀌므로 별도 메시지로 분리되어 있다 - 매 틱은
-// 가벼운 "live"(피스 위치 등)만 오고, "board"(그리드)는 실제로 바뀔 때만 온다.
+// 가벼운 "live"(피스 위치만)만 오고, "board"(그리드+통계)는 실제로 바뀔 때만 온다.
 export interface DuoLiveMessage {
   team: DuoTeam;
-  players: [DuoPlayerState, DuoPlayerState];
+  players: [DuoLivePlayerState, DuoLivePlayerState];
 }
 
 export interface DuoBoardMessage {
   team: DuoTeam;
   grid: Cell[][];
+  players: [DuoStatsPlayerState, DuoStatsPlayerState];
 }
 
 // 네트워크로 오는 실제 메시지는 아니고, DuoSession이 최신 DuoLiveMessage/DuoBoardMessage를

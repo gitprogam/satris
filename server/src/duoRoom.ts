@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import { send } from "./ws";
+import { send, sendAll } from "./ws";
 import { generateRoomCode } from "./roomCode";
 import { Board } from "../../src/game/Board";
 import { GameEngine } from "../../src/game/GameEngine";
@@ -11,6 +11,11 @@ import type { EngineSettings } from "../../src/game/Settings";
 // 직접 시뮬레이션하는 "서버 권위형"이다 - 클라이언트는 입력만 보내고 상태를 그대로 그린다.
 
 const TICK_MS = 16;
+// 게임 시뮬레이션(중력/락딜레이 타이밍 정확도)은 매 틱(60Hz) 그대로 돌리지만, 네트워크로
+// 실제 방송하는 "live"(활성 피스 위치)는 이보다 훨씬 낮은 빈도면 충분하다 - 3틱에 한 번
+// = 약 20Hz. 터널을 거치는 실사용 환경에서는 페이로드 크기보다 메시지 개수 자체가
+// 지연에 더 크게 기여해서, 빈도를 줄이는 게 렉 완화에 제일 효과적이었다.
+const LIVE_BROADCAST_EVERY_N_TICKS = 3;
 
 type TeamIndex = 0 | 1; // 0 = A팀, 1 = B팀
 type SlotIndex = 0 | 1;
@@ -23,6 +28,7 @@ interface DuoRoom {
   boards?: [Board, Board];
   engines?: [[GameEngine, GameEngine], [GameEngine, GameEngine]];
   tickTimer?: ReturnType<typeof setInterval>;
+  tickCounter: number;
 }
 
 interface SocketInfo {
@@ -44,15 +50,21 @@ function teamSockets(room: DuoRoom, team: TeamIndex): (WebSocket | null)[] {
 
 function broadcastWaiting(room: DuoRoom) {
   const filled = room.sockets.filter((s) => s !== null).length;
-  for (const s of room.sockets) {
-    if (s) send(s, { type: "duo:waiting", filled, total: 4 });
-  }
+  sendAll(room.sockets, { type: "duo:waiting", filled, total: 4 });
 }
 
-function playerState(engine: GameEngine) {
+// "live"(활성 피스 위치)는 매 틱 바뀌므로 이것만 자주 보낸다.
+function livePlayerState(engine: GameEngine) {
   return {
     active: engine.active,
     ghostRow: engine.active ? engine.getGhostRow() : null,
+  };
+}
+
+// 나머지(홀드/다음/점수/콤보 등)는 사실상 락이 일어날 때만 바뀌므로 duo:board와
+// 같은 타이밍(GameEngine.onBoardChanged)에만 보낸다 - 매 틱 보낼 필요가 없었음.
+function statsPlayerState(engine: GameEngine) {
+  return {
     hold: engine.holdType,
     canHold: engine.canHold,
     next: engine.nextQueue,
@@ -80,12 +92,8 @@ function routeAttack(room: DuoRoom, sourceTeam: TeamIndex, lines: number) {
 function endMatch(room: DuoRoom, losingTeam: TeamIndex) {
   if (room.tickTimer) clearInterval(room.tickTimer);
   const winningTeam: TeamIndex = losingTeam === 0 ? 1 : 0;
-  for (const s of teamSockets(room, losingTeam)) {
-    if (s) send(s, { type: "duo:teamOver", result: "lose" });
-  }
-  for (const s of teamSockets(room, winningTeam)) {
-    if (s) send(s, { type: "duo:teamOver", result: "win" });
-  }
+  sendAll(teamSockets(room, losingTeam), { type: "duo:teamOver", result: "lose" });
+  sendAll(teamSockets(room, winningTeam), { type: "duo:teamOver", result: "win" });
   for (const s of room.sockets) {
     if (s) socketInfo.delete(s);
   }
@@ -104,17 +112,18 @@ function checkTeamOver(room: DuoRoom, team: TeamIndex) {
 // 보내지 않고 GameEngine.onBoardChanged 훅에서 바뀔 때만 보낸다. 매 틱 보내는 건
 // 활성 피스 위치 등 가벼운 "live" 정보뿐 - 이게 렉의 주 원인이었음.
 function broadcastBoard(room: DuoRoom, team: TeamIndex) {
-  if (!room.boards) return;
+  if (!room.boards || !room.engines) return;
   const board = room.boards[team];
-  const ownMsg = { type: "duo:board", team: teamLabel(team), grid: board.grid };
-  for (const s of teamSockets(room, team)) {
-    if (s) send(s, ownMsg);
-  }
+  const [e0, e1] = room.engines[team];
+  const ownMsg = {
+    type: "duo:board",
+    team: teamLabel(team),
+    grid: board.grid,
+    players: [statsPlayerState(e0), statsPlayerState(e1)],
+  };
+  sendAll(teamSockets(room, team), ownMsg);
   const enemyTeam: TeamIndex = team === 0 ? 1 : 0;
-  const enemyMsg = { type: "duo:enemyBoard", grid: board.grid };
-  for (const s of teamSockets(room, enemyTeam)) {
-    if (s) send(s, enemyMsg);
-  }
+  sendAll(teamSockets(room, enemyTeam), { type: "duo:enemyBoard", grid: board.grid });
 }
 
 function tick(room: DuoRoom) {
@@ -125,16 +134,17 @@ function tick(room: DuoRoom) {
     }
   }
 
+  room.tickCounter = (room.tickCounter + 1) % LIVE_BROADCAST_EVERY_N_TICKS;
+  if (room.tickCounter !== 0) return;
+
   for (const team of [0, 1] as TeamIndex[]) {
     const [e0, e1] = room.engines[team];
     const live = {
       type: "duo:live",
       team: teamLabel(team),
-      players: [playerState(e0), playerState(e1)],
+      players: [livePlayerState(e0), livePlayerState(e1)],
     };
-    for (const s of teamSockets(room, team)) {
-      if (s) send(s, live);
-    }
+    sendAll(teamSockets(room, team), live);
   }
 }
 
@@ -173,7 +183,7 @@ function startMatch(room: DuoRoom) {
 
 function handleCreate(ws: WebSocket) {
   const code = generateRoomCode((c) => rooms.has(c));
-  const room: DuoRoom = { code, sockets: [ws, null, null, null], started: false };
+  const room: DuoRoom = { code, sockets: [ws, null, null, null], started: false, tickCounter: 0 };
   rooms.set(code, room);
   socketInfo.set(ws, { code, team: 0, slot: 0 });
   send(ws, { type: "duo:created", code });
