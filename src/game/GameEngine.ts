@@ -94,6 +94,9 @@ export class GameEngine {
   canHold = true;
   lastActionWasRotate = false;
   lastKickIndex = 0;
+  // 4-Wide 연습처럼 보드 양옆에 항상 꽉 찬 고정 벽이 있는 모드에서는 "스택 높이 18줄"
+  // 기준이 의미가 없어져서(벽 자체가 항상 그 기준을 넘김) 위험 경고(X 표시)를 꺼야 함.
+  dangerIndicatorEnabled = true;
 
   // 공유 Board 안에서 이 엔진이 움직일 수 있는 열 범위. 기본(솔로/1v1)은 [0, COLS-1]로
   // Board 자체의 폭과 같아서 사실상 제한이 없다. 2v2에서는 자기 절반 밖으로 못 나가게
@@ -220,6 +223,7 @@ export class GameEngine {
   // 테트리스 모드 관례대로 "스택 높이가 18줄(VISIBLE_ROWS-2) 이상"이면 다음 피스의
   // 스폰 모양 전체(막힌 칸/빈 칸 구분 없이)를 위험 표시 대상으로 반환한다.
   getSpawnDangerCells(): [number, number][] {
+    if (!this.dangerIndicatorEnabled) return [];
     const [nextType] = this.bag.peek(1);
     if (!nextType) return [];
 
